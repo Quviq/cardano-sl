@@ -7,6 +7,7 @@ module Pos.Util.Filesystem
        , withTempDir
        , directory
        , withTempFile
+       , getCanonicalTemporaryDirectory
        , withSystemTempFile
        , withMaybeFile
        ) where

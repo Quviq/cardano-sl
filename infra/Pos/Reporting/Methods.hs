@@ -21,6 +21,7 @@ module Pos.Reporting.Methods
        , sendReport
        , retrieveLogFiles
        , compressLogs
+       , withCompressedLogs
        ) where
 
 import           Universum
@@ -54,7 +55,7 @@ import           Serokell.Util.Text (listBuilderJSON)
 import           System.Directory (canonicalizePath, doesFileExist, removeFile)
 import           System.FilePath (takeFileName)
 import           System.Info (arch, os)
-import           System.IO (IOMode (WriteMode), hClose, hFlush, withFile)
+import           System.IO (IOMode (WriteMode), hClose)
 import           System.Wlog (LoggerConfig (..), Severity (..), WithLogger, hwFilePath, lcTree,
                               logError, logInfo, logMessage, logWarning, ltFiles, ltSubloggers,
                               retrieveLogContent)
@@ -71,7 +72,7 @@ import           Pos.Reporting.Exceptions (ReportingError (..))
 import           Pos.Reporting.MemState (HasLoggerConfig (..), HasReportServers (..),
                                          HasReportingContext (..))
 import           Pos.Util.CompileInfo (HasCompileInfo, compileInfo)
-import           Pos.Util.Filesystem (withSystemTempFile)
+import           Pos.Util.Filesystem (getCanonicalTemporaryDirectory, withSystemTempFile)
 import           Pos.Util.Util (maybeThrow, (<//>))
 
 ----------------------------------------------------------------------------
@@ -116,8 +117,7 @@ sendReport logFiles reportType appName reportServerUri = do
     e  <- try $ liftIO $ httpLbs rq reportManager
     whenLeft e $ \(e' :: SomeException) -> throwM $ SendingError e'
   where
-    partFile' fp = Form.partFile (toFileName fp) fp
-    toFileName = toText . takeFileName
+    partFile' fp = Form.partFile (toText $ takeFileName fp) fp
     mkReportInfo curTime =
         ReportInfo
         { rApplication = appName
@@ -144,20 +144,15 @@ retrieveLogFiles lconfig = fromLogTree $ lconfig ^. lcTree
             iterNext (part, node) = map (first (part :)) $ fromLogTree node
         in curElems ++ concatMap iterNext (lt ^. ltSubloggers . to HM.toList)
 
--- | Pass a list of absolute paths to log files. This function will
--- archive and compress these files and put resulting file into log
--- directory (returning filepath is absolute).
-compressLogs :: (MonadIO m) => [FilePath] -> m FilePath
+-- | Given a list of files (absolute paths), produces in-memory tarxz
+-- archive.
+compressLogs :: (MonadIO m) => [FilePath] -> m ByteString
 compressLogs files = liftIO $ do
     tar <- tarPackIndependently files
     tarxz <-
         BS.concat <$>
         runConduitRes (yield tar .| Lzma.compress (Just 0) .| consume)
-    aName <- getArchiveName
-    withFile aName WriteMode $ \handle -> do
-        BS.hPut handle tarxz
-        hFlush handle
-    pure aName
+    pure tarxz
   where
     tarPackIndependently :: [FilePath] -> IO ByteString
     tarPackIndependently paths = do
@@ -171,21 +166,37 @@ compressLogs files = liftIO $ do
             pabs <- canonicalizePath p
             Tar.packFileEntry pabs tPath
         pure $ BSL.toStrict $ Tar.write entries
-    getArchiveName = liftIO $ do
-        curTime <- formatTime defaultTimeLocale "%q" <$> getCurrentTime
-        pure $ "report-" <> curTime <> ".tar.lzma"
+
+-- | Pass a list of absolute paths to log files. This function will
+-- archive and compress these files and put resulting file into
+-- temporary directory (returning filepath is absolute).
+withCompressedLogs ::
+       (MonadIO m, MonadMask m)
+    => [FilePath]
+    -> (FilePath -> m a)
+    -> m a
+withCompressedLogs files action = do
+    tarxz <- liftIO $ compressLogs files
+    aName <- getArchiveName
+    bracket (openFile aName WriteMode)
+            (\h -> liftIO (hClose h >> removeFile aName))
+            (\h -> liftIO (BS.hPut h tarxz >> hClose h) >> action aName)
+  where
+    getArchiveName = do
+        -- Name can't be too long since there's a limitation on key size (32).
+        -- See ParseRequestBodyOptions in wai-extra.
+        curTime <- liftIO $ formatTime defaultTimeLocale "%q" <$> getCurrentTime
+        tempDir <- liftIO $ getCanonicalTemporaryDirectory
+        pure $ tempDir <//> ("report-" <> take 6 curTime <> ".txz")
 
 -- | Creates a temp file from given text
 withTempLogFile :: (MonadIO m, MonadMask m) => Text -> (FilePath -> m a) -> m a
 withTempLogFile rawLogs action = do
     withSystemTempFile "main.log" $ \tempFp tempHandle -> do
-        let getArchivePath = liftIO $ do
-                TIO.hPutStrLn tempHandle rawLogs
-                hClose tempHandle
-                archivePath <- compressLogs [tempFp]
-                canonicalizePath archivePath
-            removeArchive = liftIO . removeFile
-        bracket getArchivePath removeArchive action
+        liftIO $ do
+            TIO.hPutStrLn tempHandle rawLogs
+            hClose tempHandle
+        withCompressedLogs [tempFp] action
 
 ----------------------------------------------------------------------------
 -- Node-specific

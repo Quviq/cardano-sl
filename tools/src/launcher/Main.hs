@@ -70,7 +70,7 @@ import           Pos.DB.Rocks (NodeDBs, closeNodeDBs, dbDeleteDefault, dbGetDefa
                                dbIterSourceDefault, dbPutDefault, dbWriteBatchDefault, openNodeDBs)
 import           Pos.Launcher (HasConfigurations, withConfigurations)
 import           Pos.Launcher.Configuration (ConfigurationOptions (..))
-import           Pos.Reporting.Methods (compressLogs, retrieveLogFiles, sendReport)
+import           Pos.Reporting.Methods (retrieveLogFiles, sendReport, withCompressedLogs)
 import           Pos.ReportServer.Report (ReportType (..))
 import           Pos.Update (installerHash)
 import           Pos.Update.DB.Misc (affirmUpdateInstalled)
@@ -648,7 +648,7 @@ reportNodeCrash exitCode logConfPath reportServ = liftIO $ do
     let ec = case exitCode of
             ExitSuccess   -> 0
             ExitFailure n -> n
-    bracket (compressLogs logFiles) removeFile $ \txz ->
+    withCompressedLogs logFiles $ \txz ->
         sendReport [txz] (RCrash ec) "cardano-node" reportServ
 
 -- Taken from the 'turtle' library and modified

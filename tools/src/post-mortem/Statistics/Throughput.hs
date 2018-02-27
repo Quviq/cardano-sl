@@ -4,6 +4,7 @@ module Statistics.Throughput
 
 import           Data.Map.Strict (Map)
 import qualified Data.Map.Strict as M
+import qualified Data.Text       as T
 import           Data.Time.Units (Microsecond)
 import           Graphics.Rendering.Chart
 import           Graphics.Rendering.Chart.Backend.Diagrams (renderableToFile)
@@ -15,15 +16,17 @@ import           Pos.Util.JsonLog (JLMemPool (..))
 import           Types
 import           Universum
 
+type TxId = T.Text
+
 throughput :: FilePath
            -> Double
            -> Double
            -> Int
-           -> [(NodeId, Timestamp, Int)]
+           -> [(NodeId, Timestamp, Int, [TxId])]
            -> [(NodeId, Timestamp, JLMemPool)]
            -> IO ()
 throughput f txW waitW cnt xs ys =
-    let xs'    = [(t, c) | (_, t, c) <- xs]
+    let xs'    = [(t, c) | (_, t, c, _) <- xs]
         ys'    = mapMaybe wait ys
         times  = map fst xs' ++ map fst ys'
         tmin   = minimum times

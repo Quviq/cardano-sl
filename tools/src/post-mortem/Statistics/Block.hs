@@ -25,6 +25,8 @@ import           Statistics.Tx (txFirstReceivedF)
 import           Types
 import           Universum hiding (fold)
 
+type TxId = Text
+
 data BlockHeader = BlockHeader
     { bhNode      :: !NodeId
     , bhTimestamp :: !Timestamp
@@ -32,6 +34,7 @@ data BlockHeader = BlockHeader
     , bhPrevBlock :: !BlockHash
     , bhSlot      :: !Slot
     , bhTxCnt     :: !Int
+    , bhTxs       :: ![TxId]
     } deriving Show
 
 type SMap k a = MS.Map k a
@@ -50,6 +53,7 @@ blockHeadersF = Fold step MS.empty id
                     , bhPrevBlock = jlPrevBlock
                     , bhSlot      = jlSlot
                     , bhTxCnt     = length jlTxs
+                    , bhTxs       = jlTxs
                     }
             in MS.insert jlHash bh m
 
@@ -109,11 +113,11 @@ inBlockChainF = f <$> txFateF
     f :: SMap TxHash TxFate -> SMap TxHash Timestamp
     f = MS.map fromJust . MS.filter isJust .  MS.map txInBlockChain
 
-txCntInChainF :: Fold IndexedJLTimedEvent [(NodeId, Timestamp, Int)]
+txCntInChainF :: Fold IndexedJLTimedEvent [(NodeId, Timestamp, Int, [TxId])]
 txCntInChainF = f <$> blockHeadersF <*> blockChainF
   where
-    f :: Map BlockHash BlockHeader -> Set BlockHash -> [(NodeId, Timestamp, Int)]
-    f m cs = [(bhNode, bhTimestamp, bhTxCnt) | (_, BlockHeader{..}) <- MS.toList m, bhHash `S.member` cs]
+    f :: Map BlockHash BlockHeader -> Set BlockHash -> [(NodeId, Timestamp, Int, [TxId])]
+    f m cs = [(bhNode, bhTimestamp, bhTxCnt, bhTxs) | (_, BlockHeader{..}) <- MS.toList m, bhHash `S.member` cs]
 
 data TxFate =
       InNoBlock

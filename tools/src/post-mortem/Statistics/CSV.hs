@@ -14,23 +14,25 @@ import           Statistics.Focus (Focus (..))
 import           Types
 import           Universum
 
+type TxId = Text
+
 txCntInChainMemPoolToCSV :: FilePath
                          -> Double
-                         -> [(NodeId, Timestamp, Int)]
+                         -> [(NodeId, Timestamp, Int, [TxId])]
                          -> [(NodeId, Timestamp, JLMemPool)]
                          -> IO ()
 txCntInChainMemPoolToCSV f sp txCnt mp =
     flip evalRandT (mkStdGen 918273) $ liftIO $ withFile f WriteMode $ \h -> do
-        hPutStrLn h "time,txCount,txType,node"
-        for_ txCnt $ \(n, ts, cnt) -> csvLine h "written" n ts (fromIntegral cnt)
+        hPutStrLn h "time,txCount,txType,txs,node"
+        for_ txCnt $ \(n, ts, cnt, txs) -> csvLine h "written" n ts (fromIntegral cnt) txs
         for_ mp $ \(n, ts, p@JLMemPool{..}) ->
             whenM (inSample jlmReason) $ do
-                csvLine h (toTxType "Wait" p) n ts jlmWait
-                csvLine h (toTxType "Modify" p) n ts jlmModify
-                csvLine h (toTxType "SizeAfter" p) n ts (fromIntegral jlmSizeAfter)
+                csvLine h (toTxType "Wait" p) n ts jlmWait []
+                csvLine h (toTxType "Modify" p) n ts jlmModify []
+                csvLine h (toTxType "SizeAfter" p) n ts (fromIntegral jlmSizeAfter) []
   where
-    csvLine :: MonadIO m => Handle -> String -> NodeId -> Timestamp -> Integer -> m ()
-    csvLine h txType node time txCount = liftIO $ hPutStrLn h $ show (fromIntegral time :: Integer) ++ "," ++ show txCount ++ "," ++ txType ++ "," ++ T.unpack node
+    csvLine :: MonadIO m => Handle -> String -> NodeId -> Timestamp -> Integer -> [TxId] -> m ()
+    csvLine h txType node time txCount txs = liftIO $ hPutStrLn h $ show (fromIntegral time :: Integer) ++ "," ++ show txCount ++ "," ++ show txs ++ "," ++ txType ++ "," ++ T.unpack node
 
     draw :: MonadRandom m => m Bool
     draw = (<= sp) <$> getRandomR (0, 1)

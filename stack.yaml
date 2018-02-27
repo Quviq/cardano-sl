@@ -33,6 +33,7 @@ packages:
 - tools
 - wallet
 - wallet-new # The new (unreleased) version of the wallet
+- quickcheck
 
 - location:
     git: https://github.com/well-typed/cborg

@@ -1,0 +1,16 @@
+name:                cardano-quickcheck
+version:             0.1.0.0
+build-type:          Simple
+cabal-version:       >=1.10
+
+library
+  exposed-modules: Test
+  build-depends:       base, mtl, cardano-sl-core, QuickCheck, reflection, cardano-sl-crypto, canonical-json, containers
+  hs-source-dirs:      src
+  default-language:    Haskell2010
+
+test-suite test
+  main-is: Main.hs
+  build-depends:       base, cardano-quickcheck
+  type: exitcode-stdio-1.0
+  default-language:    Haskell2010

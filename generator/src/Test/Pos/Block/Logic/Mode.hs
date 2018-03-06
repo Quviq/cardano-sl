@@ -64,7 +64,7 @@ import           Pos.Communication.Limits (HasAdoptedBlockVersionData (..))
 import           Pos.Configuration (HasNodeConfiguration)
 import           Pos.Core (BlockVersionData, CoreConfiguration (..), GenesisConfiguration (..),
                            GenesisInitializer (..), GenesisSpec (..), HasConfiguration, SlotId,
-                           Timestamp (..), genesisSecretKeys, withGenesisSpec)
+                           Timestamp (..), genesisSecretKeys, withGenesisSpec, ProtocolConstants)
 import           Pos.Core.Configuration (HasGenesisBlockVersionData, withGenesisBlockVersionData)
 import           Pos.DB (DBPure, MonadDB (..), MonadDBRead (..), MonadGState (..))
 import qualified Pos.DB as DB
@@ -153,13 +153,13 @@ genGenesisInitializer = do
 
 -- This function creates 'CoreConfiguration' from 'TestParams' and
 -- uses it to satisfy 'HasConfiguration'.
-withTestParams :: TestParams -> (HasConfiguration => r) -> r
-withTestParams TestParams {..} = withGenesisSpec _tpStartTime coreConfiguration
+withTestParams :: ProtocolConstants -> TestParams -> (HasConfiguration => r) -> r
+withTestParams pc TestParams {..} = withGenesisSpec _tpStartTime coreConfiguration
   where
     defaultCoreConf :: CoreConfiguration
     defaultCoreConf = ccCore defaultTestConf
     coreConfiguration :: CoreConfiguration
-    coreConfiguration = defaultCoreConf {ccGenesis = GCSpec genesisSpec}
+    coreConfiguration = defaultCoreConf {ccGenesis = GCSpec genesisSpec { gsProtocolConstants = pc } }
     genesisSpec =
         defaultTestGenesisSpec
         { gsInitializer = _tpGenesisInitializer
@@ -316,8 +316,8 @@ blockPropertyToProperty ::
             BlockProperty a)
     -> Property
 blockPropertyToProperty tpGen blockProperty =
-    forAll tpGen $ \tp ->
-        withTestParams tp $
+    forAll tpGen $ \tp pc ->
+        withTestParams pc tp $
         monadic (ioProperty . runBlockTestMode tp) blockProperty
 
 -- | Simplified version of 'blockPropertyToProperty' which uses

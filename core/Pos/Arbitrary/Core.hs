@@ -523,7 +523,7 @@ instance Arbitrary G.GenesisNonAvvmBalances where
 
 instance Arbitrary G.ProtocolConstants where
     arbitrary =
-        G.ProtocolConstants <$> choose (1, 20000) <*> arbitrary <*> arbitrary <*>
+        G.ProtocolConstants <$> choose (1, 20) <*> arbitrary <*> arbitrary <*>
         arbitrary
 
 instance (HasCryptoConfiguration, HasProtocolConstants) => Arbitrary G.GenesisData where

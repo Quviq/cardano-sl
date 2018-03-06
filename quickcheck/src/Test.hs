@@ -69,10 +69,10 @@ instance Show Stakes where
       | (sh, c) <- getStakes stakes ]
 
 instance Arbitrary Stakes where
-  arbitrary = Stakes <$> nonEmptyListOf (do
+  arbitrary = Stakes <$> nonEmptyListOf (sized $ \n -> do
     stakeholder <- arbitraryUnsafe
-    coin <- oneof [choose (0, 2), choose (0, 9), choose (0, 50)]
-    return (stakeholder, coin))
+    coin <- oneof [choose (0, 2 `min` n), choose (0, 9 `min` n), choose (0, 50 `min` n)]
+    return (stakeholder, fromIntegral coin))
     where
       nonEmptyListOf gen = liftM2 (:) gen (listOf gen)
 

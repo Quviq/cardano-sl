@@ -106,33 +106,27 @@ prop_satoshi_inner (InfiniteList seeds _) stakes =
 
 fair :: Map StakeholderId Integer -> (StakeholderId, Double) -> Bool
 fair slots (sh, p) =
-  p `inInterval` (x, y) && (y-x <= 0.01 || (y-x)*5 <= p)
+  -- The frequency should be within 20% of p
+  (freq <= 0.01 && p <= freq) || abs (freq - p) * 5 <= p
   where
-    (x, y) = interval 0.1 n k
     n = sum (Map.elems slots)
     k = Map.findWithDefault 0 sh slots
+    freq = fromIntegral k / fromIntegral n
 
 unfair :: Map StakeholderId Integer -> (StakeholderId, Double) -> Maybe String
 unfair slots (sh, p)
-  | not (p `inInterval` (x, y)) = Just message
+  | confidence <= 0.00001 = Just message
   | otherwise = Nothing
   where
     message =
-      printf "After %d slots, stakeholder %s had %d slots but should have had %d (stake=%.3f%%, low=%.3f%%, high=%.3f%%)"
-        n (show sh) k (truncate (p*fromIntegral n) :: Integer) (100*p) (100*x) (100*y)
+      printf "After %d slots, stakeholder %s had %d slots but should have had %d (stake=%.3f%%, confidence=%.5f%%)"
+        n (show sh) k (truncate (p*fromIntegral n) :: Integer) (100*p) (100*confidence)
 
     n = sum (Map.elems slots)
     k = Map.findWithDefault 0 sh slots
-    (x, y) = interval 0.000001 n k
+    freq = fromIntegral k / fromIntegral n
+    distr = binomial (fromIntegral n) p
 
--- Confidence interval for binomial distribution
-interval :: Double -> Integer -> Integer -> (Double, Double)
-interval a n k
-  -- Work around bug in statistics package
-  | n == k = (x, fromIntegral 1)
-  | otherwise = (x, y)
-  where
-    (x, y) = confidenceInterval (binomialCI (mkCLFromSignificance a) (fromIntegral n) (fromIntegral k))
-
-inInterval :: Double -> (Double, Double) -> Bool
-y `inInterval` (x, z) = x <= y && y <= z
+    confidence
+      | freq <= p = cumulative (binomial (fromIntegral n) p) (fromIntegral k)
+      | otherwise = complCumulative distr (fromIntegral k-1)

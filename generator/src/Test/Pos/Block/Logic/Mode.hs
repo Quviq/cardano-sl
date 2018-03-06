@@ -19,6 +19,7 @@ module Test.Pos.Block.Logic.Mode
        , BlockProperty
        , blockPropertyToProperty
        , blockPropertyTestable
+       , withTestParams
 
        -- Lens
        , btcGStateL

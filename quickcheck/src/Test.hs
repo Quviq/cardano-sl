@@ -107,7 +107,7 @@ prop_satoshi_inner (InfiniteList seeds _) stakes =
 fair :: Map StakeholderId Integer -> (StakeholderId, Double) -> Bool
 fair slots (sh, p) =
   -- The frequency should be within 20% of p
-  (freq <= 0.01 && p <= freq) || abs (freq - p) * 5 <= p
+  abs (freq - p) * 5 <= p
   where
     n = sum (Map.elems slots)
     k = Map.findWithDefault 0 sh slots

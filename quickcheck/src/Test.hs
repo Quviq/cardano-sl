@@ -23,6 +23,12 @@ import Data.Map(Map)
 import Data.List
 import Test.Pos.Block.Logic.Mode
 import GHC.Generics
+import Text.Printf
+import Statistics.ConfidenceInt
+import Statistics.Distribution
+import Statistics.Distribution.Binomial
+import Statistics.Types
+import Data.Maybe
 
 deriving instance Eq SchemaError
 
@@ -48,12 +54,28 @@ prop_addrstake (UnsafeMultiKeyDistr m) =
   Map.size m >= 2
 prop_addrstake _ = discard
 
-newtype Stakes = Stakes [(StakeholderId, Coin)] deriving (Show, Generic)
+newtype Stakes = Stakes [(StakeholderId, Integer)] deriving Generic
+
+getStakes :: Stakes -> [(StakeholderId, Coin)]
+getStakes (Stakes xs) =
+  [(sh, mkCoin (fromInteger (n * base))) | (sh, n) <- xs]
+  where
+    base = 1000000
+
+instance Show Stakes where
+  show stakes =
+    unlines
+      [ printf "Stakeholder %s has %d coins" (show sh) (coinToInteger c)
+      | (sh, c) <- getStakes stakes ]
+
 instance Arbitrary Stakes where
-  arbitrary = Stakes <$> listOf (do
+  arbitrary = Stakes <$> nonEmptyListOf (do
     stakeholder <- arbitraryUnsafe
     coin <- oneof [choose (0, 2), choose (0, 9), choose (0, 50)]
-    return (stakeholder, mkCoin coin)) `suchThat` (not . null)
+    return (stakeholder, coin))
+    where
+      nonEmptyListOf gen = liftM2 (:) gen (listOf gen)
+
   shrink = genericShrink
 
 prop_satoshi :: Property
@@ -62,54 +84,55 @@ prop_satoshi =
   blockPropertyTestable $ stop prop_satoshi_inner
 
 prop_satoshi_inner :: HasConfiguration => InfiniteList SharedSeed -> Stakes -> Property
-prop_satoshi_inner (InfiniteList seeds _) (Stakes stakes) =
-  n > 0 ==>
-    check 0 (scanl1 (Map.unionWith (+)) (map round seeds))
+prop_satoshi_inner (InfiniteList seeds _) stakes =
+  n > 0 ==> check 1 slotss
   where
-    n = sum (map (coinToInteger . snd) stakes)
-    probs = [(x, fromIntegral (coinToInteger k) / fromIntegral n) | (x, k) <- stakes]
+    n = sum (map (coinToInteger . snd) (getStakes stakes))
+    probs = [(x, fromIntegral (coinToInteger k) / fromIntegral n) | (x, k) <- getStakes stakes]
 
     round seed =
       Map.fromListWith (+)
-        [(x, 1) | x <- NonEmpty.toList (followTheSatoshi seed stakes)]
+        [(x, 1) | x <- NonEmpty.toList (followTheSatoshi seed (getStakes stakes))]
 
-    check n (map:maps) =
-      counterexample (show map) $
-      case allFairlyChosen probs map of
-        Just x  -> collect n x
-        Nothing -> check (n+1) maps
+    slotss = scanl1 (Map.unionWith (+)) (map round seeds)
 
-allFairlyChosen :: [(StakeholderId, Double)] -> Map StakeholderId Integer -> Maybe Bool
-allFairlyChosen stakes slots
-  | Just False `elem` results = Just False
-  | all (== Just True) results = Just True
-  | otherwise = Nothing
+    check n (slots:slotss)
+      | all (fair slots) probs =
+        collect n True
+      | otherwise =
+        case catMaybes (map (unfair slots) probs) of
+          [] -> check (n+1) slotss
+          xs -> foldr counterexample (property False) xs
+
+fair :: Map StakeholderId Integer -> (StakeholderId, Double) -> Bool
+fair slots (sh, p) =
+  p `inInterval` (x, y) && (y-x <= 0.01 || (y-x)*5 <= p)
   where
+    (x, y) = interval 0.1 n k
     n = sum (Map.elems slots)
-    results =
-      [ fairlyChosen (Map.findWithDefault 0 x slots) n p | (x, p) <- stakes ]
+    k = Map.findWithDefault 0 sh slots
 
-fairlyChosen :: Integer -> Integer -> Double -> Maybe Bool
-fairlyChosen k n p
-  | cdf k n p <= 0.01 = Just False
-    -- A very ad hoc test
-  | mean - stddev <= fromIntegral k &&
-    fromIntegral k <= mean + stddev &&
-    -- N.B. stddev grows as sqrt n
-    stddev <= fromIntegral n * 0.05 = Just True
+unfair :: Map StakeholderId Integer -> (StakeholderId, Double) -> Maybe String
+unfair slots (sh, p)
+  | not (p `inInterval` (x, y)) = Just message
   | otherwise = Nothing
   where
-    mean = p * fromIntegral n
-    stddev = sqrt (fromIntegral n * p * (1-p))
+    message =
+      printf "After %d slots, stakeholder %s had %d slots but should have had %d (stake=%.3f%%, low=%.3f%%, high=%.3f%%)"
+        n (show sh) k (truncate (p*fromIntegral n) :: Integer) (100*p) (100*x) (100*y)
 
--- N.B. this is an approximation of the cdf for the binomial distribution.
--- It computes the probability that the value observed is at least this
--- extreme (far from the expected value), so e.g. cdf k n (k/n) = 1.
-cdf :: Integer -> Integer -> Double -> Double
-cdf k n p
-  | k == 0 = (1-p)^^n
-  | k == n = p^^n
-  | otherwise = exp(-fromIntegral n * entropy (fromIntegral k / fromIntegral n) p)
+    n = sum (Map.elems slots)
+    k = Map.findWithDefault 0 sh slots
+    (x, y) = interval 0.000001 n k
 
-entropy :: Double -> Double -> Double
-entropy a p = a * log (a / p) + (1-a) * log ((1-a) / (1-p))
+-- Confidence interval for binomial distribution
+interval :: Double -> Integer -> Integer -> (Double, Double)
+interval a n k
+  -- Work around bug in statistics package
+  | n == k = (x, fromIntegral 1)
+  | otherwise = (x, y)
+  where
+    (x, y) = confidenceInterval (binomialCI (mkCLFromSignificance a) (fromIntegral n) (fromIntegral k))
+
+inInterval :: Double -> (Double, Double) -> Bool
+y `inInterval` (x, z) = x <= y && y <= z

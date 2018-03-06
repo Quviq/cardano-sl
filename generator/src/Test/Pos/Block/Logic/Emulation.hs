@@ -19,8 +19,8 @@ import           Control.Monad.Base (MonadBase (..))
 import qualified Control.Monad.Trans.Control as MC
 import qualified Crypto.Random as Rand
 import           Data.Coerce (coerce)
-import           Data.Time.Units (Microsecond)
-import           Mockable (Async, Channel, ChannelT, Concurrently, CurrentTime (..), Delay (..),
+import           Data.Time.Units (Microsecond, addTime)
+import           Mockable (Async, Channel, ChannelT, Concurrently, CurrentTime(..), Delay(..),
                            Fork, MFunctor' (hoist'), Mockable (..), MyThreadId (..),
                            Production (..), Promise, SharedAtomic (..), SharedAtomicT,
                            SharedExclusive (..), SharedExclusiveT, ThreadId)
@@ -94,28 +94,28 @@ instance CanLog Emulation where
 
 -- [CSL-1376] FIXME: make it work!
 
--- instance Mockable CurrentTime Emulation where
---     liftMockable CurrentTime = Emulation $ do
---         ClockVar clockVar <- ask
---         readIORef clockVar
-
--- -- The tests compile even without this instance, meaning we don't even test
--- -- delays, which is sad.
--- instance Mockable Delay Emulation where
---     liftMockable SleepForever = return ()
---     liftMockable (Delay d) = Emulation $ do
---         ClockVar clockVar <- ask
---         atomicModifyIORef' clockVar (\t -> (addTime t d, ()))
-
 instance Mockable CurrentTime Emulation where
-    {-# INLINABLE liftMockable #-}
-    {-# SPECIALIZE INLINE liftMockable :: CurrentTime Emulation t -> Emulation t #-}
-    liftMockable = liftMockableProduction
+    liftMockable CurrentTime = Emulation $ do
+        ClockVar clockVar <- ask
+        readIORef clockVar
 
+-- The tests compile even without this instance, meaning we don't even test
+-- delays, which is sad.
 instance Mockable Delay Emulation where
-    {-# INLINABLE liftMockable #-}
-    {-# SPECIALIZE INLINE liftMockable :: Delay Emulation t -> Emulation t #-}
-    liftMockable = liftMockableProduction
+    liftMockable SleepForever = return ()
+    liftMockable (Delay d) = Emulation $ do
+        ClockVar clockVar <- ask
+        atomicModifyIORef' clockVar (\t -> (addTime t d, ()))
+
+-- instance Mockable CurrentTime Emulation where
+--     {-# INLINABLE liftMockable #-}
+--     {-# SPECIALIZE INLINE liftMockable :: CurrentTime Emulation t -> Emulation t #-}
+--     liftMockable = liftMockableProduction
+
+-- instance Mockable Delay Emulation where
+--     {-# INLINABLE liftMockable #-}
+--     {-# SPECIALIZE INLINE liftMockable :: Delay Emulation t -> Emulation t #-}
+--     liftMockable = liftMockableProduction
 
 ----------------------------------------------------------------------------
 -- Helper to use 'Production' implementation

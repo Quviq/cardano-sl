@@ -314,6 +314,7 @@ test-suite cardano-test
                      , cardano-sl-crypto
                      , cardano-sl-db
                      , cardano-sl-delegation
+                     , cardano-sl-generator
                      , cardano-sl-infra
                      , cardano-sl-lrc
                      , cardano-sl-networking

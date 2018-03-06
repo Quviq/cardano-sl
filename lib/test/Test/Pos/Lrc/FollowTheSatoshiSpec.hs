@@ -20,22 +20,23 @@ import           Pos.Crypto (PublicKey)
 import           Pos.Lrc (followTheSatoshi)
 import           Pos.Util.QuickCheck.Property (qcNotElem)
 
-import           Test.Pos.Configuration (withDefConfiguration)
+import           Test.Pos.Configuration (withDefNodeConfiguration, withDefDlgConfiguration, withDefSscConfiguration)
+import           Test.Pos.Block.Logic.Mode
 
 spec :: Spec
-spec = withDefConfiguration $ do
+spec = withDefNodeConfiguration $ withDefDlgConfiguration $ withDefSscConfiguration $ do
     let smaller = modifyMaxSuccess (const 1)
     describe "Pos.Lrc.FtsPure" $ do
         describe "followTheSatoshi" $ do
             describe "deterministic" $ do
-                prop description_ftsListLength ftsListLength
-                prop description_ftsNoStake ftsNoStake
-                prop description_ftsAllStake ftsAllStake
+                prop description_ftsListLength (blockPropertyTestable (return ftsListLength))
+                prop description_ftsNoStake (blockPropertyTestable (return ftsNoStake))
+                prop description_ftsAllStake (blockPropertyTestable (return ftsAllStake))
             describe "probabilistic" $ smaller $ do
                 prop description_ftsLowStake
-                    (ftsReasonableStake lowStake lowStakeTolerance)
+                    (blockPropertyTestable (return (ftsReasonableStake lowStake lowStakeTolerance)))
                 prop description_ftsHighStake
-                    (ftsReasonableStake highStake highStakeTolerance)
+                    (blockPropertyTestable (return (ftsReasonableStake highStake highStakeTolerance)))
   where
     description_ftsListLength =
         "the amount of stakeholders is the same as the number of slots in an epoch"

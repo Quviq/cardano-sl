@@ -12,6 +12,7 @@ import qualified Data.Set as S (deleteFindMin, fromList)
 import           Test.Hspec (Spec, describe)
 import           Test.Hspec.QuickCheck (modifyMaxSuccess, prop)
 import           Test.QuickCheck (Arbitrary (..), Property, choose, infiniteListOf, suchThat, (===))
+import           Test.QuickCheck.Monadic(stop)
 
 import           Pos.Core (Coin, HasConfiguration, SharedSeed, StakeholderId, StakesList,
                            addressHash, blkSecurityParam, epochSlots, mkCoin, sumCoins,
@@ -29,14 +30,14 @@ spec = withDefNodeConfiguration $ withDefDlgConfiguration $ withDefSscConfigurat
     describe "Pos.Lrc.FtsPure" $ do
         describe "followTheSatoshi" $ do
             describe "deterministic" $ do
-                prop description_ftsListLength (blockPropertyTestable (return ftsListLength))
-                prop description_ftsNoStake (blockPropertyTestable (return ftsNoStake))
-                prop description_ftsAllStake (blockPropertyTestable (return ftsAllStake))
+                prop description_ftsListLength (blockPropertyTestable (stop ftsListLength))
+                prop description_ftsNoStake (blockPropertyTestable (stop ftsNoStake))
+                prop description_ftsAllStake (blockPropertyTestable (stop ftsAllStake))
             describe "probabilistic" $ smaller $ do
                 prop description_ftsLowStake
-                    (blockPropertyTestable (return (ftsReasonableStake lowStake lowStakeTolerance)))
+                    (blockPropertyTestable (stop (ftsReasonableStake lowStake lowStakeTolerance)))
                 prop description_ftsHighStake
-                    (blockPropertyTestable (return (ftsReasonableStake highStake highStakeTolerance)))
+                    (blockPropertyTestable (stop (ftsReasonableStake highStake highStakeTolerance)))
   where
     description_ftsListLength =
         "the amount of stakeholders is the same as the number of slots in an epoch"

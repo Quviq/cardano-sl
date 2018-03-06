@@ -522,9 +522,13 @@ instance Arbitrary G.GenesisNonAvvmBalances where
     arbitrary = G.GenesisNonAvvmBalances <$> arbitrary
 
 instance Arbitrary G.ProtocolConstants where
-    arbitrary =
-        G.ProtocolConstants <$> choose (1, 20) <*> arbitrary <*> arbitrary <*>
-        arbitrary
+    arbitrary = do
+      -- XXX mainnet has 2000 (or does it?)
+      k <- choose (1, 20)
+      magic <- arbitrary
+      minTTL <- choose (1, 5)
+      maxTTL <- choose (minTTL, minTTL + 10)
+      return (G.ProtocolConstants k magic maxTTL minTTL)
 
 instance (HasCryptoConfiguration, HasProtocolConstants) => Arbitrary G.GenesisData where
     arbitrary = G.GenesisData

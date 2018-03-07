@@ -78,13 +78,8 @@ instance Arbitrary Stakes where
 
   shrink = genericShrink
 
-prop_satoshi :: Property
-prop_satoshi =
-  withDefNodeConfiguration $ withDefDlgConfiguration $ withDefSscConfiguration $
-  blockPropertyTestable $ stop prop_satoshi_inner
-
-prop_satoshi_inner :: HasConfiguration => InfiniteList SharedSeed -> Stakes -> Property
-prop_satoshi_inner (InfiniteList seeds _) stakes =
+prop_satoshi :: ProtocolConstants -> InfiniteList SharedSeed -> Stakes -> Property
+prop_satoshi pc (InfiniteList seeds _) stakes =
   n > 0 ==> check 1 slotss
   where
     n = sum (map (coinToInteger . snd) (getStakes stakes))
@@ -92,7 +87,7 @@ prop_satoshi_inner (InfiniteList seeds _) stakes =
 
     round seed =
       Map.fromListWith (+)
-        [(x, 1) | x <- NonEmpty.toList (followTheSatoshi seed (getStakes stakes))]
+        [(x, 1) | x <- NonEmpty.toList (withProtocolConstants pc (followTheSatoshi seed (getStakes stakes)))]
 
     slotss = scanl1 (Map.unionWith (+)) (map round seeds)
 

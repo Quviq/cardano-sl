@@ -13,7 +13,7 @@ import           Data.List.NonEmpty (fromList)
 
 import           Pos.Core.Common (Coin, SharedSeed (..), SlotLeaders, StakeholderId, coinToInteger,
                                   mkCoin, unsafeGetCoin)
-import           Pos.Core.Configuration (HasConfiguration, epochSlots)
+import           Pos.Core.Configuration (HasProtocolConstants, epochSlots)
 import           Pos.Core.Slotting (LocalSlotIndex (..))
 import           Pos.Crypto (deterministic, randomNumber)
 
@@ -41,7 +41,7 @@ coinIndexOffset c = over _CoinIndex (+ unsafeGetCoin c)
 
 -- | Assign a local slot index to each value in a list, starting with
 -- @LocalSlotIndex 0@.
-assignToSlots :: HasConfiguration => [a] -> [(LocalSlotIndex, a)]
+assignToSlots :: HasProtocolConstants => [a] -> [(LocalSlotIndex, a)]
 assignToSlots = zip [minBound..]
 
 -- | Sort values by their local slot indices, then strip the indices.
@@ -195,7 +195,7 @@ previous upper bound (and thus it's more or equal to the current lower bound).
 
 -}
 followTheSatoshiM
-    :: forall m . (Monad m, HasConfiguration)
+    :: forall m . (Monad m, HasProtocolConstants)
     => SharedSeed
     -> Coin
     -> ConduitT (StakeholderId, Coin) Void m SlotLeaders

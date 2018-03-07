@@ -1,4 +1,4 @@
-{-# LANGUAGE FlexibleContexts, ScopedTypeVariables, StandaloneDeriving, DeriveGeneric #-}
+{-# LANGUAGE FlexibleContexts, ScopedTypeVariables, StandaloneDeriving #-}
 {-# OPTIONS_GHC -w #-}
 module Test where
 
@@ -22,7 +22,6 @@ import qualified Data.Map.Strict as Map
 import Data.Map(Map)
 import Data.List
 import Test.Pos.Block.Logic.Mode
-import GHC.Generics
 import Text.Printf
 import Statistics.ConfidenceInt
 import Statistics.Distribution
@@ -54,29 +53,34 @@ prop_addrstake (UnsafeMultiKeyDistr m) =
   Map.size m >= 2
 prop_addrstake _ = discard
 
-newtype Stakes = Stakes [(StakeholderId, Integer)] deriving Generic
-
-getStakes :: Stakes -> [(StakeholderId, Coin)]
-getStakes (Stakes xs) =
-  [(sh, mkCoin (fromInteger (n * base))) | (sh, n) <- xs]
-  where
-    base = 1000000
+newtype Stakes = Stakes { getStakes :: [(StakeholderId, Coin)] }
 
 instance Show Stakes where
-  show stakes =
+  show (Stakes xs) =
     unlines
       [ printf "Stakeholder %s has %d coins" (show sh) (coinToInteger c)
-      | (sh, c) <- getStakes stakes ]
+      | (sh, c) <- xs ]
 
 instance Arbitrary Stakes where
   arbitrary = Stakes <$> nonEmptyListOf (sized $ \n -> do
     stakeholder <- arbitraryUnsafe
-    coin <- oneof [choose (0, 2 `min` n), choose (0, 9 `min` n), choose (0, 50 `min` n)]
-    return (stakeholder, fromIntegral coin))
+    let n' = n `max` 1
+    coin <- oneof [choose (1, 3 `min` n'), choose (1, 10 `min` n'), choose (1, 30 `min` n'), choose (1, 100 `min` n')]
+    return (stakeholder, mkCoin (fromIntegral coin)))
     where
       nonEmptyListOf gen = liftM2 (:) gen (listOf gen)
 
-  shrink = genericShrink
+  shrink (Stakes xs) =
+    map Stakes $
+      genericShrink xs ++
+      [[(x, mkCoin (fromIntegral (coinToInteger n `div` 2))) | (x, n) <- xs]] ++
+      merge xs
+    where
+      merge [] = []
+      merge [_] = []
+      merge ((x,m):(y,n):xs) =
+        [(x, unsafeAddCoin m n):xs] ++
+        map ((x,m):) (merge ((y,n):xs))
 
 prop_satoshi :: ProtocolConstants -> InfiniteList SharedSeed -> Stakes -> Property
 prop_satoshi pc (InfiniteList seeds _) stakes =

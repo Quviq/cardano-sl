@@ -77,3 +77,6 @@ socket-io.log
 
 # custom configuration
 custom-wallet-config.nix
+
+# tix files
+*.tix

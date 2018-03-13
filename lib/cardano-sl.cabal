@@ -267,6 +267,7 @@ test-suite cardano-test
                        -- Core
                        Test.Pos.Core.AddressSpec
                        Test.Pos.Core.CoinSpec
+                       Test.Pos.Core.Coin2Spec
                        Test.Pos.Core.SeedSpec
                        Test.Pos.Core.SlottingSpec
 

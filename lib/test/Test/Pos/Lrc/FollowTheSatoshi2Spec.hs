@@ -6,16 +6,12 @@ import Prelude
 import Test.QuickCheck
 import Pos.Util.QuickCheck.Arbitrary
 import Pos.Core
-import Control.Monad.Except
 import Pos.Util.QuickCheck.Backported
 import Pos.Lrc (followTheSatoshi)
 import qualified Data.List.NonEmpty as NonEmpty
-import qualified Data.Map.Strict as Map
-import Data.Map(Map)
 import Text.Printf
 import Statistics.Distribution
 import Statistics.Distribution.Binomial
-import Data.Maybe
 import Test.Hspec
 import Test.Hspec.QuickCheck
 
@@ -28,6 +24,13 @@ spec =
 
 newtype Stakes = Stakes { getStakes :: [(StakeholderId, Coin)] }
 
+totalStakes :: Stakes -> Integer
+totalStakes (Stakes xs) =
+  sum (map (coinToInteger . snd) xs)
+
+stakesValid :: Stakes -> Bool
+stakesValid stakes = totalStakes stakes > 0
+
 instance Show Stakes where
   show (Stakes xs) =
     unlines
@@ -35,20 +38,19 @@ instance Show Stakes where
       | (sh, c) <- xs ]
 
 instance Arbitrary Stakes where
-  arbitrary = Stakes <$> nonEmptyListOf (sized $ \n -> do
-    stakeholder <- arbitraryUnsafe
-    let n' = n `max` 1
-    coin <- oneof [choose (1, 3 `min` n'), choose (1, 10 `min` n'), choose (1, 30 `min` n'), choose (1, 100 `min` n')]
-    return (stakeholder, mkCoin (fromIntegral coin)))
+  arbitrary = (Stakes <$> listOf stake) `suchThat` stakesValid
     where
-      nonEmptyListOf gen = liftM2 (:) gen (listOf gen)
+      stake = sized $ \n -> do
+        stakeholder <- arbitraryUnsafe
+        coin <- oneof [choose (0, 3 `min` n), choose (0, 10 `min` n), choose (0, 30 `min` n), choose (0, 100 `min` n)]
+        return (stakeholder, mkCoin (fromIntegral coin))
 
   shrink (Stakes stakes) =
-    map Stakes $
-      genericShrink stakes ++
-      [[(x, mkCoin (fromIntegral (coinToInteger n `div` 2))) | (x, n) <- stakes]] ++
-      merge stakes
+    filter stakesValid $ map Stakes $ genericShrink stakes ++ merge stakes
     where
+      -- Try merging adjacent stakeholders, adding their stakes
+      -- (this is more likely to work than generic shrinking because it does not
+      -- alter the coin indices assigned to other stakeholders)
       merge [] = []
       merge [_] = []
       merge ((x,m):(y,n):xs) =
@@ -57,50 +59,39 @@ instance Arbitrary Stakes where
 
 prop_satoshi :: ProtocolConstants -> InfiniteList SharedSeed -> Stakes -> Property
 prop_satoshi pc (InfiniteList seeds _) stakes =
-  n > 0 ==> check 0 (Map.fromList probs) slotss
+  conjoin [prop 1 x p (totalsFor x) | (x, p) <- expectedProbabilities]
   where
-    n = sum (map (coinToInteger . snd) (getStakes stakes))
-    probs = [(x, fromIntegral (coinToInteger k) / fromIntegral n) | (x, k) <- getStakes stakes]
+    expectedProbabilities =
+      [ (x, fromIntegral (coinToInteger k) / fromIntegral (totalStakes stakes))
+      | (x, k) <- getStakes stakes]
 
-    round seed =
-      Map.fromListWith (+)
-        [(x, 1) | x <- NonEmpty.toList (withProtocolConstants pc (followTheSatoshi seed (getStakes stakes)))]
+    leaders =
+      [ NonEmpty.toList (withProtocolConstants pc (followTheSatoshi seed (getStakes stakes)))
+      | seed <- seeds ]
 
-    slotss = scanl1 (Map.unionWith (+)) (map round seeds)
+    totalSlots = scanl1 (+) (map length leaders)
+    totalSlotsFor x = scanl1 (+) (map (length . filter (== x)) leaders)
+    totalsFor x = zip totalSlots (totalSlotsFor x)
 
-    check n probs ~(slots:slotss)
-      | Map.null probs = property True -- collect n True
-      | otherwise =
-        case catMaybes (map (unfair slots) (Map.toList probs)) of
-          [] ->
-            let probs' = Map.fromList (filter (not . fair slots) (Map.toList probs)) in
-            check (n+1) (if n > 10 then probs' else probs) slotss
-          xs -> foldr counterexample (property False) xs
+    prop :: Int -> StakeholderId -> Double -> [(Int, Int)] -> Property
+    prop i x p ~((n, k):xs)
+        -- confidence only goes up to (roughly) 0.5
+      | confidence n k p >= 0.25 = property True
+      | confidence n k p <= 0.00000001 =
+        let expectedSlots = truncate (p*fromIntegral n) :: Integer
+            actualProbability = fromIntegral k/fromIntegral n :: Double in
+        counterexample (printf "Wrong number of slots after round %d (%d slots total)" i n) $
+        counterexample (printf "Stakeholder: %s" (show x)) $
+        counterexample (printf "Expected slots: %d (%.3f%%)" expectedSlots p) $
+        counterexample (printf "Actual slots: %d (%.3f%%)" k actualProbability) $
+        counterexample (printf "P-value: %.3f%%" (100*confidence n k p)) $
+        False
+      | otherwise = prop (i+1) x p xs
 
-fair :: Map StakeholderId Integer -> (StakeholderId, Double) -> Bool
-fair slots (sh, p) =
-  -- confidence only goes up to (roughly) 0.5
-  confidence n p k >= 0.25
-  where
-    n = sum (Map.elems slots)
-    k = Map.findWithDefault 0 sh slots
-
-unfair :: Map StakeholderId Integer -> (StakeholderId, Double) -> Maybe String
-unfair slots (sh, p)
-  | confidence n p k <= 0.00000001 = Just message
-  | otherwise = Nothing
-  where
-    message =
-      printf "After %d slots, stakeholder %s had %d slots but should have had %d (stake=%.3f%%, confidence=%.5f%%)"
-        n (show sh) k (truncate (p*fromIntegral n) :: Integer) (100*p) (100*confidence n p k)
-
-    n = sum (Map.elems slots)
-    k = Map.findWithDefault 0 sh slots
-
-confidence :: Integer -> Double -> Integer -> Double
-confidence n p k
-  | freq <= p = cumulative (binomial (fromIntegral n) p) (fromIntegral k)
-  | otherwise = complCumulative distr (fromIntegral k-1)
+confidence :: Int -> Int -> Double -> Double
+confidence n k p
+  | freq <= p = cumulative (binomial n p) (fromIntegral k)
+  | otherwise = complCumulative distr (fromIntegral (k-1))
   where
     freq = fromIntegral k / fromIntegral n
-    distr = binomial (fromIntegral n) p
+    distr = binomial n p

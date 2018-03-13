@@ -44,7 +44,7 @@ prop constants magic =
   give constants $ give magic $ 
   property $ \(x :: GenesisData) -> roundTrip x
 
-main = quickCheckWith stdArgs { maxSuccess = 1000 } prop
+main = quickCheckWith stdArgs { maxSuccess = 1000 } prop_satoshi
 
 prop_addrstake :: AddrStakeDistribution -> Bool
 prop_addrstake (UnsafeMultiKeyDistr m) =

@@ -1,5 +1,6 @@
 -- | Simpler specification of Pos.Core.Coin
 
+{-# OPTIONS_GHC -w #-}
 module Test.Pos.Core.Coin2Spec ( spec ) where
 
 import Universum

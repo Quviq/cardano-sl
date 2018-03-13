@@ -84,7 +84,7 @@ instance Arbitrary Stakes where
 
 prop_satoshi :: ProtocolConstants -> InfiniteList SharedSeed -> Stakes -> Property
 prop_satoshi pc (InfiniteList seeds _) stakes =
-  n > 0 ==> check 1 slotss
+  n > 0 ==> check 0 (Map.fromList probs) slotss
   where
     n = sum (map (coinToInteger . snd) (getStakes stakes))
     probs = [(x, fromIntegral (coinToInteger k) / fromIntegral n) | (x, k) <- getStakes stakes]
@@ -95,37 +95,39 @@ prop_satoshi pc (InfiniteList seeds _) stakes =
 
     slotss = scanl1 (Map.unionWith (+)) (map round seeds)
 
-    check n (slots:slotss)
-      | all (fair slots) probs =
-        collect n True
+    check n probs (slots:slotss)
+      | Map.null probs = property True -- collect n True
       | otherwise =
-        case catMaybes (map (unfair slots) probs) of
-          [] -> check (n+1) slotss
+        case catMaybes (map (unfair slots) (Map.toList probs)) of
+          [] ->
+            let probs' = Map.fromList (filter (not . fair slots) (Map.toList probs)) in
+            check (n+1) (if n > 10 then probs' else probs) slotss
           xs -> foldr counterexample (property False) xs
 
 fair :: Map StakeholderId Integer -> (StakeholderId, Double) -> Bool
 fair slots (sh, p) =
-  -- The frequency should be within 20% of p
-  abs (freq - p) * 5 <= p
+  -- confidence only goes up to (roughly) 0.5
+  confidence n p k >= 0.25
   where
     n = sum (Map.elems slots)
     k = Map.findWithDefault 0 sh slots
-    freq = fromIntegral k / fromIntegral n
 
 unfair :: Map StakeholderId Integer -> (StakeholderId, Double) -> Maybe String
 unfair slots (sh, p)
-  | confidence <= 0.00001 = Just message
+  | confidence n p k <= 0.00000001 = Just message
   | otherwise = Nothing
   where
     message =
       printf "After %d slots, stakeholder %s had %d slots but should have had %d (stake=%.3f%%, confidence=%.5f%%)"
-        n (show sh) k (truncate (p*fromIntegral n) :: Integer) (100*p) (100*confidence)
+        n (show sh) k (truncate (p*fromIntegral n) :: Integer) (100*p) (100*confidence n p k)
 
     n = sum (Map.elems slots)
     k = Map.findWithDefault 0 sh slots
+
+confidence :: Integer -> Double -> Integer -> Double
+confidence n p k
+  | freq <= p = cumulative (binomial (fromIntegral n) p) (fromIntegral k)
+  | otherwise = complCumulative distr (fromIntegral k-1)
+  where
     freq = fromIntegral k / fromIntegral n
     distr = binomial (fromIntegral n) p
-
-    confidence
-      | freq <= p = cumulative (binomial (fromIntegral n) p) (fromIntegral k)
-      | otherwise = complCumulative distr (fromIntegral k-1)

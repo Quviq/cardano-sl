@@ -273,6 +273,7 @@ test-suite cardano-test
 
                        -- LRC
                        Test.Pos.Lrc.FollowTheSatoshiSpec
+                       Test.Pos.Lrc.FollowTheSatoshi2Spec
 
                        -- Ssc
                        Test.Pos.Ssc.ComputeSharesSpec
@@ -342,6 +343,7 @@ test-suite cardano-test
                      , reflection
                      , safecopy
                      , serokell-util >= 0.1.3.4
+                     , statistics
                      , tagged
                      , text
                      , text-format

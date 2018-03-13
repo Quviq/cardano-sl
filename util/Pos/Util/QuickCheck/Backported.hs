@@ -1,6 +1,9 @@
-module QuickCheckStuff where
+-- | Functionality backported from newer versions of QuickCheck.
+module Pos.Util.QuickCheck.Backported where
 
+import Universum
 import Test.QuickCheck
+import Text.Show
 
 ----------------------------------------------------------------------
 -- | @InfiniteList xs _@: guarantees that xs is an infinite list.
@@ -40,10 +43,10 @@ instance Show a => Show (InfiniteList a) where
   showsPrec _ (InfiniteList _ (Infinite _)) =
     ("<infinite list>" ++)
   showsPrec n (InfiniteList _ (FinitePrefix xs)) =
-    (if n > 10 then ('(':) else id) .
+    (if n > 10 then ('(':) else identity) .
     showsPrec 0 xs .
     (" ++ ..." ++) .
-    (if n > 10 then (')':) else id)
+    (if n > 10 then (')':) else identity)
 
 instance Arbitrary a => Arbitrary (InfiniteList a) where
   arbitrary = fmap infiniteListFromData arbitrary
@@ -53,6 +56,6 @@ instance Arbitrary a => Arbitrary (InfiniteList a) where
 instance Arbitrary a => Arbitrary (InfiniteListInternalData a) where
   arbitrary = fmap Infinite infiniteList
   shrink (Infinite xs) =
-    [FinitePrefix (take n xs) | n <- map (2^) [0..]]
+    [FinitePrefix (take n xs) | n <- map (2^) [0 :: Int ..]]
   shrink (FinitePrefix xs) =
     map FinitePrefix (shrink xs)

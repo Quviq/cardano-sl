@@ -202,7 +202,7 @@ instance Perturb StakeOwnership where
                let n = fromIntegral (getCoin c) ]
     where
       coins = totalCoins s
-      bound n = truncate (fromIntegral n * tolerance (fromIntegral n / fromIntegral coins))
+      bound n = truncate (fromIntegral coins * tolerance (fromIntegral n / fromIntegral coins))
 
 perturbing :: (Faulty, Perturb a, Show a, Testable prop) =>
   a -> (a -> prop) -> Property

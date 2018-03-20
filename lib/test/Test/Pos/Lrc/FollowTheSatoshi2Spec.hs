@@ -114,7 +114,14 @@ prop_satoshi pc (InfiniteList seeds _) s =
     countSlots :: (StakeholderId -> Bool) -> [Int]
     countSlots p = scanl1 (+) (map (length . filter p) leaders)
 
-    pValue = 0.000000001 -- the target p-value
+    -- The target p-value.
+    -- Bear in mind that we are running (say) 1000 tests, with an
+    -- average of (say) 50 stakeholders, so a p-value of 1% would be
+    -- hit almost every time! This value means we expect to see a
+    -- false positive every billion tests or so.
+    pValue = 1/10^11
+    -- XXX would it make sense to a have a lower p-value for
+    -- acceptance, with a smaller tolerance?
 
     prop :: StakeholderId -> Double -> [(Int, Int)] -> Property
     prop x p ~((n, k):xs)

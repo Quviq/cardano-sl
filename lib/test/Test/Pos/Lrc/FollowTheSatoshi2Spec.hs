@@ -22,31 +22,37 @@ spec =
         modifyMaxSuccess (*10) $
           prop "All stakeholders get a fair amount" prop_satoshi
 
-newtype Stakes = Stakes { getStakes :: [(StakeholderId, Coin)] }
+-- A type which records how many coins each stakeholder owns.
+newtype StakeOwnership = StakeOwnership { stakes :: [(StakeholderId, Coin)] }
 
-totalStakes :: Stakes -> Integer
-totalStakes (Stakes xs) =
-  sum (map (coinToInteger . snd) xs)
+-- The total amount of coins owned by anyone.
+totalCoins :: StakeOwnership -> Integer
+totalCoins = sum . map (coinToInteger . snd) . stakes
 
-stakesValid :: Stakes -> Bool
-stakesValid stakes = totalStakes stakes > 0
+-- The proportion of coins owned by each stakeholder.
+stakeProportions :: StakeOwnership -> [(StakeholderId, Double)]
+stakeProportions s =
+  [ (x, fromIntegral (coinToInteger c) / fromIntegral n)
+  | (x, c) <- stakes s ]
+  where
+    n = totalCoins s
 
-instance Show Stakes where
-  show (Stakes xs) =
+instance Show StakeOwnership where
+  show s =
     unlines
-      [ printf "Stakeholder %s has %d coins" (show sh) (coinToInteger c)
-      | (sh, c) <- xs ]
+      [ printf "Stakeholder %s has %d coins" (show x) (coinToInteger c)
+      | (x, c) <- stakes s ]
 
-instance Arbitrary Stakes where
-  arbitrary = (Stakes <$> listOf stake) `suchThat` stakesValid
+instance Arbitrary StakeOwnership where
+  arbitrary = (StakeOwnership <$> listOf stake)
     where
-      stake = sized $ \n -> do
+      stake = do
         stakeholder <- arbitraryUnsafe
-        coin <- oneof [choose (0, 3 `min` n), choose (0, 10 `min` n), choose (0, 30 `min` n), choose (0, 100 `min` n)]
-        return (stakeholder, mkCoin (fromIntegral coin))
+        coin <- arbitraryCoin
+        return (stakeholder, coin)
 
-  shrink (Stakes stakes) =
-    filter stakesValid $ map Stakes $ genericShrink stakes ++ merge stakes
+  shrink (StakeOwnership stakes) =
+    map StakeOwnership $ genericShrink stakes ++ merge stakes
     where
       -- Try merging adjacent stakeholders, adding their stakes
       -- (this is more likely to work than generic shrinking because it does not
@@ -57,21 +63,39 @@ instance Arbitrary Stakes where
         [(x, unsafeAddCoin m n):xs] ++
         map ((x,m):) (merge ((y,n):xs))
 
-prop_satoshi :: ProtocolConstants -> InfiniteList SharedSeed -> Stakes -> Property
-prop_satoshi pc (InfiniteList seeds _) stakes =
-  conjoin [prop x p (totalsFor x) | (x, p) <- expectedProbabilities]
+-- A generator for coins which generates a mixture of small and large coins,
+-- rather than using a uniform distribution.
+arbitraryCoin :: Gen Coin
+arbitraryCoin = sized $ \n -> do
+  i <- choose (0, (length bounds - 1) * n `div` 100)
+  mkCoin . fromIntegral <$> choose (0, bounds !! i)
   where
-    expectedProbabilities =
-      [ (x, fromIntegral (coinToInteger k) / fromIntegral (totalStakes stakes))
-      | (x, k) <- getStakes stakes]
+    -- [maxBound, maxBound `div` 3, maxBound `div` 9, ...]
+    bounds = reverse (takeWhile (> 0) (iterate (`div` 3) (getCoin maxBound)))
 
-    leaders =
-      [ NonEmpty.toList (withProtocolConstants pc (followTheSatoshi seed (getStakes stakes)))
-      | seed <- seeds ]
+prop_satoshi :: ProtocolConstants -> InfiniteList SharedSeed -> StakeOwnership -> Property
+prop_satoshi pc (InfiniteList seeds _) s =
+  totalCoins s > 0 ==>
+  -- Evaluate the property for each stakeholder and "and" the results
+  conjoin $ do
+    (x, p) <- stakeProportions s
+    -- Count how many total slots there are and how many were assigned to x
+    let total = countSlots (const True)
+        mine = countSlots (== x)
+    return (prop x p (zip total mine))
+  where
+    -- An infinite list of elected stakeholders (each element represents the
+    -- results of one election)
+    leaders :: [[StakeholderId]]
+    leaders = map run seeds
+      where
+        run seed =
+          NonEmpty.toList (withProtocolConstants pc (followTheSatoshi seed (stakes s)))
 
-    totalSlots = scanl1 (+) (map length leaders)
-    totalSlotsFor x = scanl1 (+) (map (length . filter (== x)) leaders)
-    totalsFor x = zip totalSlots (totalSlotsFor x)
+    -- How many of the elected slots satisfy 'p'? Computes a running sum over
+    -- all elections.
+    countSlots :: (StakeholderId -> Bool) -> [Int]
+    countSlots p = scanl1 (+) (map (length . filter p) leaders)
 
     pValue = 0.000000001 -- the target p-value
 
@@ -88,13 +112,16 @@ prop_satoshi pc (InfiniteList seeds _) stakes =
         False
       | otherwise = prop x p xs
 
--- rejectPpValue n k p: the p-value for rejecting the hypothesis
--- that the probability is p, after n tests with k successes.
--- When this is low enough we reject the test case.
+-- rejectPValue n k p: the p-value for rejecting the hypothesis that the
+-- probability of being elected is p, after being elected k times in n
+-- elections. When this is low enough we reject the test case.
 rejectPValue :: Int -> Int -> Double -> Double
 rejectPValue n k p
   -- Multiplying by 2 gives us a two-tailed test.
-  --
+  -- At least, it does for continuous distributions; for a discrete
+  -- discrete distribution, it may give a higher answer. This is OK because:
+  -- 1) it will only cause us to continue testing instead of stopping;
+  -- 2) this error goes away as n becomes larger.
   | freq <= p = 2*cumulative distr (fromIntegral k)
   | otherwise = 2*complCumulative distr (fromIntegral (k-1))
   where
@@ -102,7 +129,7 @@ rejectPValue n k p
     distr = binomial n p
 
 -- acceptPValue n k p: the p-value for rejecting the hypothesis
--- that the probability is p+1% or p-1% (whichever is most likely).
+-- that the probability is p+0.01 or p-0.01 (whichever is most likely).
 -- When this is low enough we accept the test case.
 acceptPValue :: Int -> Int -> Double -> Double
 acceptPValue n k p =

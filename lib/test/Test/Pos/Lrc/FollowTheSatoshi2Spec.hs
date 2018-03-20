@@ -19,7 +19,7 @@ spec :: Spec
 spec =
   describe "Pos.Lrc.Pure" $
     describe "followTheSatoshi" $
-        modifyMaxSuccess (const 10000) $
+        modifyMaxSuccess (*10) $
           prop "All stakeholders get a fair amount" prop_satoshi
 
 newtype Stakes = Stakes { getStakes :: [(StakeholderId, Coin)] }
@@ -75,8 +75,9 @@ prop_satoshi pc (InfiniteList seeds _) stakes =
 
     prop :: Int -> StakeholderId -> Double -> [(Int, Int)] -> Property
     prop i x p ~((n, k):xs)
-        -- confidence only goes up to (roughly) 0.5
-      | confidence n k p >= 0.25 = property True
+      | and [ confidence n k p' <= 0.000000001
+            | p' <- [p-0.01, p+0.01], p' >= 0, p' <= 1 ] =
+        collect i (property True)
       | confidence n k p <= 0.00000001 =
         let expectedSlots = truncate (p*fromIntegral n) :: Integer
             actualProbability = fromIntegral k/fromIntegral n :: Double in
@@ -90,8 +91,8 @@ prop_satoshi pc (InfiniteList seeds _) stakes =
 
 confidence :: Int -> Int -> Double -> Double
 confidence n k p
-  | freq <= p = cumulative (binomial n p) (fromIntegral k)
-  | otherwise = complCumulative distr (fromIntegral (k-1))
+  | freq <= p = min 1 (2*cumulative distr (fromIntegral k))
+  | otherwise = min 1 (2*complCumulative distr (fromIntegral (k-1)))
   where
     freq = fromIntegral k / fromIntegral n
     distr = binomial n p

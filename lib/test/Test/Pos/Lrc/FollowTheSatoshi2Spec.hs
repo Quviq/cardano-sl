@@ -59,7 +59,7 @@ instance Arbitrary Stakes where
 
 prop_satoshi :: ProtocolConstants -> InfiniteList SharedSeed -> Stakes -> Property
 prop_satoshi pc (InfiniteList seeds _) stakes =
-  conjoin [prop 1 x p (totalsFor x) | (x, p) <- expectedProbabilities]
+  conjoin [prop x p (totalsFor x) | (x, p) <- expectedProbabilities]
   where
     expectedProbabilities =
       [ (x, fromIntegral (coinToInteger k) / fromIntegral (totalStakes stakes))
@@ -73,26 +73,37 @@ prop_satoshi pc (InfiniteList seeds _) stakes =
     totalSlotsFor x = scanl1 (+) (map (length . filter (== x)) leaders)
     totalsFor x = zip totalSlots (totalSlotsFor x)
 
-    prop :: Int -> StakeholderId -> Double -> [(Int, Int)] -> Property
-    prop i x p ~((n, k):xs)
-      | and [ confidence n k p' <= 0.000000001
-            | p' <- [p-0.01, p+0.01], p' >= 0, p' <= 1 ] =
-        collect i (property True)
-      | confidence n k p <= 0.00000001 =
+    pValue = 0.000000001 -- the target p-value
+
+    prop :: StakeholderId -> Double -> [(Int, Int)] -> Property
+    prop x p ~((n, k):xs)
+      | acceptPValue n k p <= pValue = property True
+      | rejectPValue n k p <= pValue =
         let expectedSlots = truncate (p*fromIntegral n) :: Integer
             actualProbability = fromIntegral k/fromIntegral n :: Double in
-        counterexample (printf "Wrong number of slots after round %d (%d slots total)" i n) $
-        counterexample (printf "Stakeholder: %s" (show x)) $
-        counterexample (printf "Expected slots: %d (%.3f%%)" expectedSlots p) $
-        counterexample (printf "Actual slots: %d (%.3f%%)" k actualProbability) $
-        counterexample (printf "P-value: %.3f%%" (100*confidence n k p)) $
+        counterexample (printf "Stakeholder %s has wrong number of slots" (show x)) $
+        counterexample (printf "Expected: %d out of %d (%.3f%%)" expectedSlots n p) $
+        counterexample (printf "Actual: %d out of %d (%.3f%%)" k n actualProbability) $
+        counterexample (printf "Rejected with P-value: %.10f%%" (100*rejectPValue n k p)) $
         False
-      | otherwise = prop (i+1) x p xs
+      | otherwise = prop x p xs
 
-confidence :: Int -> Int -> Double -> Double
-confidence n k p
-  | freq <= p = min 1 (2*cumulative distr (fromIntegral k))
-  | otherwise = min 1 (2*complCumulative distr (fromIntegral (k-1)))
+-- rejectPpValue n k p: the p-value for rejecting the hypothesis
+-- that the probability is p, after n tests with k successes.
+-- When this is low enough we reject the test case.
+rejectPValue :: Int -> Int -> Double -> Double
+rejectPValue n k p
+  -- Multiplying by 2 gives us a two-tailed test.
+  --
+  | freq <= p = 2*cumulative distr (fromIntegral k)
+  | otherwise = 2*complCumulative distr (fromIntegral (k-1))
   where
     freq = fromIntegral k / fromIntegral n
     distr = binomial n p
+
+-- acceptPValue n k p: the p-value for rejecting the hypothesis
+-- that the probability is p+1% or p-1% (whichever is most likely).
+-- When this is low enough we accept the test case.
+acceptPValue :: Int -> Int -> Double -> Double
+acceptPValue n k p =
+  maximum [rejectPValue n k p' | p' <- [p-0.01, p+0.01], p' >= 0, p' <= 1]

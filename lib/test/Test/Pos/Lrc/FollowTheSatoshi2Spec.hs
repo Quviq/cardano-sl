@@ -26,8 +26,14 @@ spec =
       prop "The property detects unfair implementations" (expectFailure (faultRate 0.01 prop_satoshi))
 
 -- What is the smallest error we want to catch?
-tolerance :: Double
-tolerance = 0.005 -- probabilities must match to within 0.5%
+-- The tolerance is represented as a proportion of the expected probability.
+-- If the expected probability is p, the actual probability must lie between
+-- p-tolerance p and p+tolerance p.
+tolerance :: Double -> Double
+tolerance p =
+  -- If the probability is small, we check that it is at most 0.5%.
+  -- Otherwise, the tolerance is 5% of the probability.
+  clamp (0.005, 1) (p * 0.05)
 
 -- A type which records how many coins each stakeholder owns.
 newtype StakeOwnership = StakeOwnership { stakes :: [(StakeholderId, Coin)] }
@@ -140,11 +146,11 @@ rejectPValue n k p
     distr = binomial n p
 
 -- acceptPValue n k p: the p-value for rejecting the hypothesis
--- that the probability is p+tolerance or p-tolerance (whichever is most likely).
+-- that the probability is outside of the tolerance.
 -- When this is low enough we accept the test case.
 acceptPValue :: Int -> Int -> Double -> Double
 acceptPValue n k p =
-  maximum [rejectPValue n k p' | p' <- [p-tolerance, p+tolerance], p' >= 0, p' <= 1]
+  maximum [rejectPValue n k p' | p' <- [p-tolerance p, p+tolerance p], p' >= 0, p' <= 1]
 
 -- Experimental work on fault injection.
 newtype FaultRate = FaultRate Double
@@ -170,8 +176,8 @@ fault bad good = do
     Just x -> return x
     Nothing -> good
 
-clamp :: Ord a => a -> a -> a -> a
-clamp lower upper x
+clamp :: Ord a => (a, a) -> a -> a
+clamp (lower, upper) x
   | x < lower = lower
   | x > upper = upper
   | otherwise = x
@@ -190,12 +196,13 @@ instance Perturb StakeOwnership where
     sequence [do c' <- mkCoin <$> fromIntegral <$>
                        -- Coin is really a Word64;
                        -- do arithmetic on Integer so that clamping to 0 works
-                       clamp 0 coins <$> perturbBy bound (fromIntegral (getCoin c))
+                       clamp (0, coins) <$> perturbBy (bound n) n
                  return (x, c')
-             | (x, c) <- stakes s]
+             | (x, c) <- stakes s,
+               let n = fromIntegral (getCoin c) ]
     where
       coins = totalCoins s
-      bound = truncate (fromIntegral coins * tolerance)
+      bound n = truncate (fromIntegral n * tolerance (fromIntegral n / fromIntegral coins))
 
 perturbing :: (Faulty, Perturb a, Show a, Testable prop) =>
   a -> (a -> prop) -> Property

@@ -38,4 +38,4 @@ spec = describe "Coin properties" $ do
     ioProperty (catch (return $! unsafeGetCoin (c1 `impl` c2) == ans)
                       (\(_ :: ErrorCall) -> return $ not ok))
     where ans = unsafeGetCoin c1 `op` unsafeGetCoin c2
-    	  ok  = ans >= 0 && ans <= maxCoinVal
+	  ok  = ans >= 0 && ans <= maxCoinVal

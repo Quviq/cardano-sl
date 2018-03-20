@@ -22,6 +22,10 @@ spec =
         modifyMaxSuccess (*10) $
           prop "All stakeholders get a fair amount" prop_satoshi
 
+-- What is the smallest error we want to catch?
+tolerance :: Double
+tolerance = 0.005 -- probabilities must match to within 0.5%
+
 -- A type which records how many coins each stakeholder owns.
 newtype StakeOwnership = StakeOwnership { stakes :: [(StakeholderId, Coin)] }
 
@@ -131,8 +135,8 @@ rejectPValue n k p
     distr = binomial n p
 
 -- acceptPValue n k p: the p-value for rejecting the hypothesis
--- that the probability is p+0.01 or p-0.01 (whichever is most likely).
+-- that the probability is p+tolerance or p-tolerance (whichever is most likely).
 -- When this is low enough we accept the test case.
 acceptPValue :: Int -> Int -> Double -> Double
 acceptPValue n k p =
-  maximum [rejectPValue n k p' | p' <- [p-0.01, p+0.01], p' >= 0, p' <= 1]
+  maximum [rejectPValue n k p' | p' <- [p-tolerance, p+tolerance], p' >= 0, p' <= 1]

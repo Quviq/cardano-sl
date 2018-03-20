@@ -31,9 +31,9 @@ spec =
 -- p-tolerance p and p+tolerance p.
 tolerance :: Double -> Double
 tolerance p =
-  -- If the probability is small, we check that it is at most 0.5%.
+  -- If the probability is small, we check that it is at most 0.1%.
   -- Otherwise, the tolerance is 5% of the probability.
-  clamp (0.005, 1) (p * 0.05)
+  clamp (0.001, 1) (p * 0.05)
 
 -- A type which records how many coins each stakeholder owns.
 newtype StakeOwnership = StakeOwnership { stakes :: [(StakeholderId, Coin)] }

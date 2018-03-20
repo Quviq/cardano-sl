@@ -118,7 +118,6 @@ prop_satoshi pc (InfiniteList seeds _) s =
 
     prop :: StakeholderId -> Double -> [(Int, Int)] -> Property
     prop x p ~((n, k):xs)
-      | acceptPValue n k p <= pValue = property True
       | rejectPValue n k p <= pValue =
         let expectedSlots = truncate (p*fromIntegral n) :: Integer
             actualProbability = fromIntegral k/fromIntegral n :: Double in
@@ -127,6 +126,7 @@ prop_satoshi pc (InfiniteList seeds _) s =
         counterexample (printf "Actual: %d out of %d (%.3f%%)" k n actualProbability) $
         counterexample (printf "Rejected with P-value: %.10f%%" (100*rejectPValue n k p)) $
         False
+      | acceptPValue n k p <= pValue = property True
       | otherwise = prop x p xs
 
 -- rejectPValue n k p: the p-value for rejecting the hypothesis that the

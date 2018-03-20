@@ -44,7 +44,9 @@ instance Show StakeOwnership where
       | (x, c) <- stakes s ]
 
 instance Arbitrary StakeOwnership where
-  arbitrary = (StakeOwnership <$> listOf stake)
+  arbitrary =
+    (StakeOwnership <$> listOf stake)
+    `suchThat` (\s -> totalCoins s <= fromIntegral (getCoin maxBound))
     where
       stake = do
         stakeholder <- arbitraryUnsafe

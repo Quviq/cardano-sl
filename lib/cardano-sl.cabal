@@ -272,7 +272,6 @@ test-suite cardano-test
                        Test.Pos.Core.SlottingSpec
 
                        -- LRC
-                       Test.Pos.Lrc.FollowTheSatoshiSpec
                        Test.Pos.Lrc.FollowTheSatoshi2Spec
 
                        -- Ssc
@@ -316,7 +315,6 @@ test-suite cardano-test
                      , cardano-sl-crypto
                      , cardano-sl-db
                      , cardano-sl-delegation
-                     , cardano-sl-generator
                      , cardano-sl-infra
                      , cardano-sl-lrc
                      , cardano-sl-networking

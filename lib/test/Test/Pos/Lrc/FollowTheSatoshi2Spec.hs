@@ -1,4 +1,5 @@
 {-# OPTIONS_GHC -Wno-name-shadowing -Wno-type-defaults #-}
+{-# LANGUAGE RankNTypes #-}
 module Test.Pos.Lrc.FollowTheSatoshi2Spec where
 
 import Prelude
@@ -14,13 +15,15 @@ import Statistics.Distribution
 import Statistics.Distribution.Binomial
 import Test.Hspec
 import Test.Hspec.QuickCheck
+import Data.Reflection
+import System.Random
 
 spec :: Spec
 spec =
   describe "Pos.Lrc.Pure" $
-    describe "followTheSatoshi" $
-        modifyMaxSuccess (*10) $
-          prop "All stakeholders get a fair amount" prop_satoshi
+    describe "followTheSatoshi2" $ do
+      prop "All stakeholders get a fair amount" (noFaults prop_satoshi)
+      prop "The property detects unfair implementations" (expectFailure (faultRate 0.01 prop_satoshi))
 
 -- What is the smallest error we want to catch?
 tolerance :: Double
@@ -79,12 +82,14 @@ arbitraryCoin = sized $ \n -> do
     -- [maxBound, maxBound `div` 3, maxBound `div` 9, ...]
     bounds = reverse (takeWhile (> 0) (iterate (`div` 3) (getCoin maxBound)))
 
-prop_satoshi :: ProtocolConstants -> InfiniteList SharedSeed -> StakeOwnership -> Property
+prop_satoshi :: Faulty => ProtocolConstants -> InfiniteList SharedSeed -> StakeOwnership -> Property
 prop_satoshi pc (InfiniteList seeds _) s =
   totalCoins s > 0 ==>
+  -- Fault injection for testing if the property finds bugs
+  perturbing s $ \sFault ->
   -- Evaluate the property for each stakeholder and "and" the results
   conjoin $ do
-    (x, p) <- stakeProportions s
+    (x, p) <- stakeProportions sFault
     -- Count how many total slots there are and how many were assigned to x
     let total = countSlots (const True)
         mine = countSlots (== x)
@@ -140,3 +145,64 @@ rejectPValue n k p
 acceptPValue :: Int -> Int -> Double -> Double
 acceptPValue n k p =
   maximum [rejectPValue n k p' | p' <- [p-tolerance, p+tolerance], p' >= 0, p' <= 1]
+
+-- Experimental work on fault injection.
+newtype FaultRate = FaultRate Double
+type Faulty = Given FaultRate
+
+faultRate :: Testable prop => Double -> (Faulty => prop) -> Property
+faultRate x prop = property (give (FaultRate x) prop)
+
+noFaults :: Testable prop => (Faulty => prop) -> Property
+noFaults = faultRate 0
+
+maybeFault :: Faulty => Gen a -> Gen (Maybe a)
+maybeFault bad = do
+  let FaultRate p = given
+  x <- choose (0, 1)
+  -- Should never generate faulty data when p=0
+  if x <= p && p /= 0 then Just <$> bad else return Nothing
+
+fault :: Faulty => Gen a -> Gen a -> Gen a
+fault bad good = do
+  mx <- maybeFault bad
+  case mx of
+    Just x -> return x
+    Nothing -> good
+
+clamp :: Ord a => a -> a -> a -> a
+clamp lower upper x
+  | x < lower = lower
+  | x > upper = upper
+  | otherwise = x
+
+perturbBy :: (Num a, Random a) => a -> a -> Gen a
+perturbBy bound x = do
+  err <- choose (-bound, bound)
+  return (x+err)
+
+class Perturb a where
+  perturb :: a -> Gen a
+
+instance Perturb StakeOwnership where
+  perturb s =
+    StakeOwnership <$>
+    sequence [do c' <- mkCoin <$> fromIntegral <$>
+                       -- Coin is really a Word64;
+                       -- do arithmetic on Integer so that clamping to 0 works
+                       clamp 0 coins <$> perturbBy bound (fromIntegral (getCoin c))
+                 return (x, c')
+             | (x, c) <- stakes s]
+    where
+      coins = totalCoins s
+      bound = truncate (fromIntegral coins * tolerance)
+
+perturbing :: (Faulty, Perturb a, Show a, Testable prop) =>
+  a -> (a -> prop) -> Property
+perturbing x prop = property $ again $ do
+  my <- maybeFault (perturb x)
+  return $
+    case my of
+      Nothing -> property (prop x)
+      Just y ->
+        counterexample ("Injected fault: " ++ show y) (prop y)

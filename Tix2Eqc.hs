@@ -11,7 +11,6 @@ import Data.Ord
 import Data.Tree
 import Control.Monad
 
-deriving instance Ord Mix
 instance Ord Hash where
   compare = comparing show
 

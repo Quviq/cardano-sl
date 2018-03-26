@@ -1,0 +1,10 @@
+#!/bin/bash
+[ -d all ] && rm -r all
+mkdir all
+cp -r ../*/{src,Pos,Test} all
+ghc --make -O Tix2Eqc
+./Tix2Eqc ../.stack-work/install/x86_64-linux-nopie/lts-9.1/8.0.2/hpc/cardano-sl/cardano-test/cardano-test.tix ../*/.stack-work/dist/x86_64-linux-nopie/Cabal-1.24.2.0/hpc
+erlc tix2eqc.erl
+cd erl_scan && rm -f erl_scan.beam && erlc haskell_scan.erl erl_scan.erl && cd ..
+erl -eval 'tix2eqc:run()'
+echo "You can find a coverage report in all/index.html."

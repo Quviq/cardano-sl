@@ -8,6 +8,7 @@ import Data.List
 import Data.Function
 import Data.Maybe
 import Data.Ord
+import Data.Tree
 import Control.Monad
 
 deriving instance Ord Mix
@@ -17,11 +18,15 @@ instance Ord Hash where
 usort :: Ord a => [a] -> [a]
 usort = map head . group . sort
 
-partitionBy :: Ord b => (a -> b) -> [a] -> [(b, [a])]
-partitionBy f =
-  map get . groupBy ((==) `on` f) . sortBy (comparing f)
-  where
-    get xs@(x:_) = (f x, xs)
+partitionBy :: Ord b => (a -> b) -> [a] -> [[a]]
+partitionBy f = groupBy ((==) `on` f) . sortBy (comparing f)
+
+partitionBy' :: Ord b => (a -> b) -> [a] -> [(b, [a])]
+partitionBy' f =
+  map (with (f . head)) . groupBy ((==) `on` f) . sortBy (comparing f)
+
+with :: (a -> b) -> a -> (b, a)
+with f x = (f x, x)
 
 string :: String -> String
 string x = "\"" ++ x ++ "\""
@@ -72,24 +77,43 @@ makeTick mix (pos, BinBox _ False) n =
   Just (Tick (makeLoc mix pos) ["false"] n)
 makeTick _ _ _ = Nothing
 
+pruneTicks :: [Tick] -> [Tick]
+pruneTicks = concatMap pruneFile . partitionBy (locFile . tickLoc)
+  where
+    pruneFile =
+      concat . concatMap flatten .
+      -- Remove children which are identical (excluding labels) to their parents
+      map pruneChildren .
+      -- If there is a labelled tick, don't include the unlabelled version
+      map (fmap pruneNode) .
+      -- Make the domination tree
+      map (fmap snd) . createMixEntryDom . map (with (locPos . tickLoc))
+
+    pruneNode ticks = filter p ticks
+      where
+        p tick = all (null . tickLabels) ticks || not (null (tickLabels tick))
+
+    pruneChildren (Node ticks ts) =
+      Node ticks (map pruneChildren (concatMap collapse ts))
+      where
+        n = sum (map tickCount ticks)
+        collapse (Node [tick] ts)
+          | tickCount tick == n && null (tickLabels tick) = ts
+        collapse node = [node]
+  
 main = do
   tixfile:mixdirs <- getArgs
   Just (Tix mods) <- readTix tixfile
   mixes <- sequence [readMix mixdirs (Right mod) | mod <- mods]
   let
     allTicks =
-      catMaybes [
+      pruneTicks $ catMaybes [
         makeTick mix entry n
         | (mix@(Mix _ _ _ _ entries), mod) <- zip mixes mods,
           (entry, n) <- zip entries (tixModuleTixs mod) ]
     allLocs = usort (map tickLoc allTicks)
     allFiles = usort (map locFile allLocs)
 
-    -- If there is a labelled tick, don't include the unlabelled version
-    prune ticks = filter p ticks
-      where
-        p tick = all (null . tickLabels) ticks || not (null (tickLabels tick))
-  
   writeFile "tix2eqc_data.erl" $ unlines [
     decl (call "-module" ["tix2eqc_data"]),
     decl (call "-compile" ["export_all"]),
@@ -101,7 +125,7 @@ main = do
         list
           [ tuple [list [showPos (locPos loc)], showLoc loc]
           | loc <- locs ]]
-        | (file, locs) <- partitionBy locFile allLocs ],
+        | (file, locs) <- partitionBy' locFile allLocs ],
     decl . fun "data" [] $
       list [tuple [
         "tix2eqc_data",
@@ -110,8 +134,8 @@ main = do
             showLoc loc,
             list [
               tuple [list (map string (tickLabels tick)), show (tickCount tick)]
-              | tick <- prune ticks ]]
-          | (loc, ticks) <- partitionBy tickLoc allTicks ]]]]
+              | tick <- ticks ]]
+          | (loc, ticks) <- partitionBy' tickLoc allTicks ]]]]
           
   system "erl -eval 'compile:file(tix2eqc_data)' -eval 'eqc_cover:write_html(tix2eqc_data:data(), [])' -eval 'erlang:halt()'"
   where

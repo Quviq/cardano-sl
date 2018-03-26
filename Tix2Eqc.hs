@@ -8,7 +8,6 @@ import Data.List
 import Data.Function
 import Data.Maybe
 import Data.Ord
-import Text.Printf
 import Control.Monad
 
 deriving instance Ord Mix
@@ -74,7 +73,7 @@ makeTick mix (pos, BinBox _ False) n =
 makeTick _ _ _ = Nothing
 
 main = do
-  erlmod:tixfile:mixdirs <- getArgs
+  tixfile:mixdirs <- getArgs
   Just (Tix mods) <- readTix tixfile
   mixes <- sequence [readMix mixdirs (Right mod) | mod <- mods]
   let
@@ -91,8 +90,8 @@ main = do
       where
         p tick = all (null . tickLabels) ticks || not (null (tickLabels tick))
   
-  writeFile (erlmod ++ ".erl") $ unlines [
-    decl (call "-module" [erlmod]),
+  writeFile "tix2eqc_data.erl" $ unlines [
+    decl (call "-module" ["tix2eqc_data"]),
     decl (call "-compile" ["export_all"]),
     decl (fun (atom "__eqc_cover_files") []
       (list (map string allFiles))),
@@ -105,7 +104,7 @@ main = do
         | (file, locs) <- partitionBy locFile allLocs ],
     decl . fun "data" [] $
       list [tuple [
-        erlmod,
+        "tix2eqc_data",
         list [
           tuple [
             showLoc loc,
@@ -114,5 +113,5 @@ main = do
               | tick <- prune ticks ]]
           | (loc, ticks) <- partitionBy tickLoc allTicks ]]]]
           
-  system (printf "erl -eval 'compile:file(%s)' -eval 'eqc_cover:write_html(%s:data(), [])' -eval 'erlang:halt()'" erlmod erlmod)
+  system "erl -eval 'compile:file(tix2eqc_data)' -eval 'eqc_cover:write_html(tix2eqc_data:data(), [])' -eval 'erlang:halt()'"
   where

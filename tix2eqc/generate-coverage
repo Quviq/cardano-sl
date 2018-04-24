@@ -2,6 +2,8 @@
 [ -d all ] && rm -r all
 mkdir all
 cp -r ../*/{src,Pos,Test} all
+rename 's!/!-!g' $(find all -type f)
+rename 's!-!/!' all-*
 ghc --make -O Tix2Eqc
 ./Tix2Eqc ../.stack-work/install/x86_64-linux-nopie/lts-9.1/8.0.2/hpc/cardano-sl/cardano-test/cardano-test.tix ../*/.stack-work/dist/x86_64-linux-nopie/Cabal-1.24.2.0/hpc
 erlc tix2eqc.erl

@@ -48,6 +48,17 @@ fun f xs body = call f xs ++ " -> " ++ body
 decl :: String -> String
 decl x = x ++ "."
 
+-- Filenames have slashes replaced by dashes (see generate-coverage)
+-- because eqc_cover doesn't support hierarchical modules.
+filename :: String -> String
+filename xs =
+  case xs of
+    '.':'/':xs -> string ("./" ++ map replace xs)
+    _ -> string (map replace xs)
+  where
+    replace '/' = '-'
+    replace c = c
+
 data Loc = Loc { locFile :: FilePath, locHash :: Hash, locPos :: HpcPos }
   deriving (Eq, Ord, Show)
 
@@ -117,10 +128,10 @@ main = do
     decl (call "-module" ["tix2eqc_data"]),
     decl (call "-compile" ["export_all"]),
     decl (fun (atom "__eqc_cover_files") []
-      (list (map string allFiles))),
+      (list (map filename allFiles))),
     decl . fun (atom "__eqc_cover_ranges") [] $
       list [tuple [
-        string file,
+        filename file,
         list
           [ tuple [list [showPos (locPos loc)], showLoc loc]
           | loc <- locs ]]
@@ -135,6 +146,3 @@ main = do
               tuple [list (map string (tickLabels tick)), show (tickCount tick)]
               | tick <- ticks ]]
           | (loc, ticks) <- partitionBy' tickLoc allTicks ]]]]
-          
-  system "erl -eval 'compile:file(tix2eqc_data)' -eval 'eqc_cover:write_html(tix2eqc_data:data(), [])' -eval 'erlang:halt()'"
-  where

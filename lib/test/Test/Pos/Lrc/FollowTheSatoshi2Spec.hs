@@ -17,13 +17,16 @@ import Test.Hspec
 import Test.Hspec.QuickCheck
 import Data.Reflection
 import System.Random
+import Pos.Crypto.Random
 
 spec :: Spec
 spec =
-  describe "Pos.Lrc.Pure" $
+  describe "Pos.Lrc.Pure" $ do
     describe "followTheSatoshi2" $ do
       prop "All stakeholders get a fair amount" (noFaults prop_satoshi)
       prop "The property detects unfair implementations" (expectFailure (faultRate 0.01 prop_satoshi))
+    describe "randomNumber" $
+      prop "Check distribution of random numbers" prop_randomNumber
 
 -- What is the smallest error we want to catch?
 -- The tolerance is represented as a proportion of the expected probability.
@@ -135,6 +138,30 @@ prop_satoshi pc (InfiniteList seeds _) s =
         False
       | acceptPValue n k p <= pValue = property True
       | otherwise = prop x p xs
+
+prop_randomNumber :: InfiniteList SharedSeed -> Positive Integer -> Property
+prop_randomNumber (InfiniteList seeds _) (Positive n) =
+  conjoin [check 0 0 i vals | i <- [0..n-1]]
+  where
+    vals = map gen seeds
+    gen (SharedSeed seed) =
+      deterministic seed (randomNumber n)
+
+    p = 1 / fromIntegral n
+    check n k x ~(val:vals)
+      | rejectPValue n k p <= pValue =
+        let expectedSlots = truncate (p*fromIntegral n) :: Integer
+            actualProbability = fromIntegral k/fromIntegral n :: Double in
+        counterexample (printf "Stakeholder %s has wrong number of slots" (show x)) $
+        counterexample (printf "Expected: %d out of %d (%.3f%%)" expectedSlots n p) $
+        counterexample (printf "Actual: %d out of %d (%.3f%%)" k n actualProbability) $
+        counterexample (printf "Rejected with P-value: %.10f%%" (100*rejectPValue n k p)) $
+        False
+      | acceptPValue n k p <= pValue = property True
+      | otherwise =
+        check (n+1) (k + if x == val then 1 else 0) x vals
+
+    pValue = 1/10^6
 
 -- rejectPValue n k p: the p-value for rejecting the hypothesis that the
 -- probability of being elected is p, after being elected k times in n

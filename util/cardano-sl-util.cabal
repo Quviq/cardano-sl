@@ -20,7 +20,6 @@ library
                        Pos.Util.QuickCheck
                        Pos.Util.QuickCheck.Arbitrary
                        Pos.Util.QuickCheck.Property
-                       Pos.Util.QuickCheck.Backported
                        Pos.Util.CompileInfo
 
                        Pos.Util.Concurrent

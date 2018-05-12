@@ -236,3 +236,5 @@ ghc-options:
   cardano-sl-explorer:   -Werror
   cardano-sl-node:       -Werror
   cardano-sl-wallet-new: -Werror
+
+allow-newer: True

@@ -26,8 +26,8 @@ import           Mockable (CurrentTime, Mockable, currentTime)
 import           UnliftIO (MonadUnliftIO)
 
 import           Pos.Binary.Class (biSize)
-import           Pos.Core (HasConfiguration, ProxySKHeavy, addressHash, bvdMaxBlockSize,
-                           epochIndexL, headerHash)
+import           Pos.Core (ProxySKHeavy, addressHash, bvdMaxBlockSize, HasProtocolMagic,
+                           epochIndexL, headerHash, HasGenesisBlockVersionData)
 import           Pos.Crypto (ProxySecretKey (..), PublicKey)
 import           Pos.DB (MonadDBRead, MonadGState)
 import qualified Pos.DB as DB
@@ -35,10 +35,9 @@ import           Pos.Delegation.Cede (CheckForCycle (..), cmPskMods, dlgVerifyPs
                                       emptyCedeModifier, evalMapCede, pskToDlgEdgeAction)
 import           Pos.Delegation.Class (DlgMemPool, MonadDelegation, dwMessageCache, dwPoolSize,
                                        dwProxySKPool, dwTip)
-import           Pos.Delegation.Helpers (isRevokePsk)
 import           Pos.Delegation.Logic.Common (DelegationStateAction, runDelegationStateAction)
 import           Pos.Delegation.Lrc (getDlgRichmen)
-import           Pos.Delegation.Types (DlgPayload (..))
+import           Pos.Delegation.Types (DlgPayload (..), isRevokePsk)
 import           Pos.Lrc.Context (HasLrcContext)
 import           Pos.StateLock (StateLock, withStateLockNoMetrics)
 import           Pos.Util (HasLens', microsecondsToUTC)
@@ -68,16 +67,12 @@ clearDlgMemPoolAction = do
 -- Put value into Proxy SK Pool. Value must not exist in pool.
 -- Caller must ensure it.
 -- Caller must also ensure that size limit allows to put more data.
-putToDlgMemPool
-    :: HasConfiguration
-    => PublicKey -> ProxySKHeavy -> DelegationStateAction ()
+putToDlgMemPool :: PublicKey -> ProxySKHeavy -> DelegationStateAction ()
 putToDlgMemPool pk psk = do
     dwProxySKPool . at pk .= Just psk
     dwPoolSize += biSize pk + biSize psk
 
-deleteFromDlgMemPool
-    :: HasConfiguration
-    => PublicKey -> DelegationStateAction ()
+deleteFromDlgMemPool :: PublicKey -> DelegationStateAction ()
 deleteFromDlgMemPool pk =
     use (dwProxySKPool . at pk) >>= \case
         Nothing -> pass
@@ -87,9 +82,7 @@ deleteFromDlgMemPool pk =
 
 -- Caller must ensure that there won't be too much data (more than limit) as
 -- a result of transformation.
-modifyDlgMemPool
-    :: HasConfiguration
-    => (DlgMemPool -> DlgMemPool) -> DelegationStateAction ()
+modifyDlgMemPool :: (DlgMemPool -> DlgMemPool) -> DelegationStateAction ()
 modifyDlgMemPool f = do
     memPool <- use dwProxySKPool
     let newPool = f memPool
@@ -122,7 +115,6 @@ type ProcessHeavyConstraint ctx m =
        , MonadReader ctx m
        , HasLrcContext ctx
        , Mockable CurrentTime m
-       , HasConfiguration
        )
 
 -- | Processes heavyweight psk. Puts it into the mempool
@@ -132,6 +124,8 @@ processProxySKHeavy
     :: forall ctx m.
        ( ProcessHeavyConstraint ctx m
        , HasLens' ctx StateLock
+       , HasGenesisBlockVersionData
+       , HasProtocolMagic
        )
     => ProxySKHeavy -> m PskHeavyVerdict
 processProxySKHeavy psk =
@@ -142,7 +136,7 @@ processProxySKHeavy psk =
 -- synchronization. Should be called __only__ if you are sure that
 -- 'StateLock' is taken already.
 processProxySKHeavyInternal ::
-       forall ctx m. (ProcessHeavyConstraint ctx m)
+       forall ctx m. (ProcessHeavyConstraint ctx m, HasGenesisBlockVersionData, HasProtocolMagic)
     => ProxySKHeavy
     -> m PskHeavyVerdict
 processProxySKHeavyInternal psk = do

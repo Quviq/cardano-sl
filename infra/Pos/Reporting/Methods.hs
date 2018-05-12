@@ -15,7 +15,6 @@ module Pos.Reporting.Methods
        , reportOrLog
        , reportOrLogE
        , reportOrLogW
-       , tryReport
 
        -- * Internals, exported for custom usages.
        -- E. g. to report crash from launcher.
@@ -52,7 +51,8 @@ import           Network.HTTP.Client.TLS (tlsManagerSettings)
 import           Network.Info (IPv4 (..), getNetworkInterfaces, ipv4)
 import           Pos.ReportServer.Report (ReportInfo (..), ReportType (..))
 import           Serokell.Util.Text (listBuilderJSON)
-import           System.Directory (canonicalizePath, doesFileExist, removeFile)
+import           System.Directory (canonicalizePath, doesFileExist, getTemporaryDirectory,
+                                   removeFile)
 import           System.FilePath (takeFileName)
 import           System.Info (arch, os)
 import           System.IO (IOMode (WriteMode), hClose, hFlush, withFile)
@@ -62,8 +62,7 @@ import           System.Wlog (LoggerConfig (..), Severity (..), WithLogger, hwFi
 
 
 import           Paths_cardano_sl_infra (version)
-import           Pos.Core.Configuration (HasConfiguration, protocolMagic)
-import           Pos.Crypto (ProtocolMagic (..))
+import           Pos.Crypto (ProtocolMagic (..), HasProtocolMagic, protocolMagic)
 import           Pos.DB.Error (DBError (..))
 import           Pos.Exception (CardanoFatalError)
 import           Pos.KnownPeers (MonadFormatPeers (..))
@@ -89,7 +88,7 @@ import           Pos.Util.Util (maybeThrow, (<//>))
 -- same file, see 'System.IO' documentation on handles. See
 -- 'withTempLogFile' to overcome this problem.
 sendReport
-    :: (HasConfiguration, HasCompileInfo, MonadIO m, MonadMask m)
+    :: (HasProtocolMagic, HasCompileInfo, MonadIO m, MonadMask m)
     => [FilePath]                 -- ^ Log files to read from
     -> ReportType
     -> Text
@@ -148,6 +147,11 @@ retrieveLogFiles lconfig = fromLogTree $ lconfig ^. lcTree
 -- | Pass a list of absolute paths to log files. This function will
 -- archive and compress these files and put resulting file into log
 -- directory (returning filepath is absolute).
+--
+-- It will throw a PackingError in case:
+--   - Any of the file paths given does not point to an existing file.
+--   - Any of the file paths could not be converted to a tar path, for instance
+--     because it is too long.
 compressLogs :: (MonadIO m) => [FilePath] -> m FilePath
 compressLogs files = liftIO $ do
     tar <- tarPackIndependently files
@@ -174,7 +178,8 @@ compressLogs files = liftIO $ do
         pure $ BSL.toStrict $ Tar.write entries
     getArchiveName = liftIO $ do
         curTime <- formatTime defaultTimeLocale "%q" <$> getCurrentTime
-        pure $ "report-" <> curTime <> ".tar.lzma"
+        tempDir <- getTemporaryDirectory
+        pure $ tempDir <//> ("report-" <> curTime <> ".tar.lzma")
 
 -- | Creates a temp file from given text
 withTempLogFile :: (MonadIO m, MonadMask m) => Text -> (FilePath -> m a) -> m a
@@ -200,7 +205,7 @@ type MonadReporting ctx m =
        , HasReportingContext ctx
        , HasNodeType ctx
        , WithLogger m
-       , HasConfiguration
+       , HasProtocolMagic
        , HasCompileInfo
        )
 
@@ -372,36 +377,25 @@ reportError = reportNode True True . RError
 
 -- | Exception handler which reports (and logs) an exception or just
 -- logs it. It reports only few types of exceptions which definitely
--- deserve attention. Other types are ignored. Function returns whether
--- exception was reported. It's suitable for long-running workers which
--- want to catch all exceptions and restart after delay. If you are
--- catching all exceptions somewhere, you most likely want to use this
--- handler (and maybe do something else).
+-- deserve attention. Other types are simply logged. It's suitable for
+-- long-running workers which want to catch all exceptions and restart
+-- after delay. If you are catching all exceptions somewhere, you most
+-- likely want to use this handler (and maybe do something else).
 --
 -- NOTE: it doesn't rethrow an exception. If you are sure you need it,
 -- you can rethrow it by yourself.
-tryReport
+reportOrLog
     :: forall ctx m . (MonadReporting ctx m)
-    => Text -> SomeException -> m Bool
-tryReport prefix exc =
+    => Severity -> Text -> SomeException -> m ()
+reportOrLog severity prefix exc =
     case tryCast @CardanoFatalError <|> tryCast @ErrorCall <|> tryCast @DBError of
-        Just msg -> True <$ reportError (prefix <> msg)
-        Nothing  -> pure False
+        Just msg -> reportError $ prefix <> msg
+        Nothing  -> logMessage severity $ prefix <> pretty exc
   where
     tryCast ::
            forall e. Exception e
         => Maybe Text
     tryCast = toText . displayException <$> fromException @e exc
-
--- | Similar to 'tryReport', performs simple logging if exception is
--- not suitable for being reported.
-reportOrLog
-    :: forall ctx m . (MonadReporting ctx m)
-    => Severity -> Text -> SomeException -> m ()
-reportOrLog severity prefix exc = do
-    success <- tryReport prefix exc
-    unless success $ do
-        logMessage severity $ prefix <> pretty exc
 
 -- | A version of 'reportOrLog' which uses 'Error' severity.
 reportOrLogE

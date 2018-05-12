@@ -53,7 +53,7 @@ import           Test.Pos.Configuration (HasStaticConfigurations, withStaticConf
 spec :: Spec
 -- Unfortunatelly, blocks generation is quite slow nowdays.
 -- See CSL-1382.
-spec = withStaticConfigurations $ withCompileInfo def $
+spec = withStaticConfigurations $ \_ -> withCompileInfo def $
     describe "Block.Logic.VAR" $ modifyMaxSuccess (min 4) $ do
         describe "verifyBlocksPrefix" verifyBlocksPrefixSpec
         describe "verifyAndApplyBlocks" verifyAndApplyBlocksSpec
@@ -120,10 +120,11 @@ verifyValidBlocks = do
 ----------------------------------------------------------------------------
 
 verifyAndApplyBlocksSpec
-    :: (HasStaticConfigurations,HasCompileInfo) => Spec
+    :: ( HasStaticConfigurations, HasCompileInfo ) => Spec
 verifyAndApplyBlocksSpec = do
     blockPropertySpec applyByOneOrAllAtOnceDesc (applyByOneOrAllAtOnce applier)
   where
+    applier :: HasConfiguration => OldestFirst NE Blund -> BlockTestMode ()
     applier blunds =
         let blocks = map fst blunds
         in satisfySlotCheck blocks $

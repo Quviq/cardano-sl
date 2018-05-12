@@ -32,23 +32,24 @@ import           Pos.DB.DB as DB
 import qualified Pos.GState as GS
 import           Pos.Lrc (LrcContext (..), mkLrcSyncData)
 import           Pos.Slotting (HasSlottingVar (..), MonadSlots (..), MonadSlotsData,
-                               SimpleSlottingVar, mkSimpleSlottingVar)
+                               SimpleSlottingStateVar, mkSimpleSlottingStateVar)
 import qualified Pos.Slotting as Slot
 import           Pos.Txp (GenericTxpLocalData (..), MempoolExt, MonadTxpMem, TxpHolderTag,
                           mkTxpLocalData)
 import           Pos.Util (postfixLFields)
+import           Pos.Util.Mockable () -- need this for orphan instances :\
 import           Pos.Util.Util (HasLens (..))
 
 import           Pos.Explorer.ExtraContext (ExtraContext, ExtraContextT, HasExplorerCSLInterface,
                                             HasGenesisRedeemAddressInfo, makeExtraCtx,
                                             runExtraContextT)
 import           Pos.Explorer.Socket.Holder (ConnectionsState)
-import           Pos.Explorer.Txp (ExplorerExtra (..))
+import           Pos.Explorer.Txp (ExplorerExtraModifier (..))
 
 -- Need Emulation because it has instance Mockable CurrentTime
 import           Mockable (Production, currentTime, runProduction)
 import           Pos.Launcher.Configuration (HasConfigurations)
-import           Pos.Util.JsonLog (HasJsonLogConfig (..), jsonLogDefault)
+import           Pos.Util.JsonLog.Events (HasJsonLogConfig (..), jsonLogDefault)
 import           Pos.Util.LoggerName (HasLoggerName' (..), askLoggerNameDefault,
                                       modifyLoggerNameDefault)
 import           Pos.Util.TimeWarp (CanJsonLog (..))
@@ -103,16 +104,19 @@ type ExplorerExtraTestMode = ExtraContextT ExplorerTestMode
 data ExplorerTestContext = ExplorerTestContext
     { etcGState       :: !GS.GStateContext
     , etcSystemStart  :: !Timestamp
-    , etcSSlottingVar :: !SimpleSlottingVar
+    , etcSSlottingVar :: !SimpleSlottingStateVar
     , etcSlotId       :: !(Maybe SlotId)
     -- ^ If this value is 'Just' we will return it as the current
     -- slot. Otherwise simple slotting is used.
-    , etcTxpLocalData :: !(GenericTxpLocalData ExplorerExtra)
+    , etcTxpLocalData :: !(GenericTxpLocalData ExplorerExtraModifier)
     , etcLoggerName   :: !LoggerName
     , etcParams       :: !ExplorerTestParams
     }
 
 makeLensesWith postfixLFields ''ExplorerTestContext
+
+instance HasLens SimpleSlottingStateVar ExplorerTestContext SimpleSlottingStateVar where
+    lensOf = etcSSlottingVar_L
 
 ----------------------------------------------------------------------------
 -- Mock initialization
@@ -145,7 +149,7 @@ initExplorerTestContext tp@TestParams {..} = do
         _gscSlogGState <- mkSlogGState
         _gscSlottingVar <- newTVarIO =<< GS.getSlottingData
         let etcGState = GS.GStateContext {_gscDB = DB.PureDB dbPureVar, ..}
-        etcSSlottingVar <- mkSimpleSlottingVar
+        etcSSlottingVar <- mkSimpleSlottingStateVar
         etcSystemStart <- Timestamp <$> currentTime
         etcTxpLocalData <- mkTxpLocalData
 
@@ -211,9 +215,9 @@ instance HasLens DB.DBPureVar ExplorerTestContext DB.DBPureVar where
         realDBInTestsError = error "You are using real db in tests"
 
 -- We need to define the full transformer stack type.
-type instance MempoolExt ExplorerExtraTestMode = ExplorerExtra
+type instance MempoolExt ExplorerExtraTestMode = ExplorerExtraModifier
 
-instance HasLens TxpHolderTag ExplorerTestContext (GenericTxpLocalData ExplorerExtra) where
+instance HasLens TxpHolderTag ExplorerTestContext (GenericTxpLocalData ExplorerExtraModifier) where
     lensOf = etcTxpLocalData_L
 
 instance HasLens LoggerName ExplorerTestContext LoggerName where
@@ -237,15 +241,15 @@ instance (HasConfigurations, MonadSlotsData ctx ExplorerTestMode)
   where
     getCurrentSlot = do
         view etcSlotId_L >>= \case
-            Nothing -> Slot.getCurrentSlotSimple =<< view etcSSlottingVar_L
+            Nothing -> Slot.getCurrentSlotSimple
             Just slot -> pure (Just slot)
     getCurrentSlotBlocking =
         view etcSlotId_L >>= \case
-            Nothing -> Slot.getCurrentSlotBlockingSimple =<< view etcSSlottingVar_L
+            Nothing -> Slot.getCurrentSlotBlockingSimple
             Just slot -> pure slot
     getCurrentSlotInaccurate = do
         view etcSlotId_L >>= \case
-            Nothing -> Slot.getCurrentSlotInaccurateSimple =<< view etcSSlottingVar_L
+            Nothing -> Slot.getCurrentSlotInaccurateSimple
             Just slot -> pure slot
     currentTimeSlotting = Slot.currentTimeSlottingSimple
 

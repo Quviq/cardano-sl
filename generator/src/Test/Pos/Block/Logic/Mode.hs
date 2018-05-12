@@ -24,7 +24,7 @@ module Test.Pos.Block.Logic.Mode
        , btcGStateL
        , btcSystemStartL
        , btcLoggerNameL
-       , btcSSlottingVarL
+       , btcSSlottingStateVarL
        , btcUpdateContextL
        , btcSscStateL
        , btcTxpMemL
@@ -60,11 +60,11 @@ import           Test.QuickCheck.Monadic (PropertyM, monadic)
 import           Pos.AllSecrets (AllSecrets (..), HasAllSecrets (..), mkAllSecretsSimple)
 import           Pos.Block.BListener (MonadBListener (..), onApplyBlocksStub, onRollbackBlocksStub)
 import           Pos.Block.Slog (HasSlogGState (..), mkSlogGState)
-import           Pos.Communication.Limits (HasAdoptedBlockVersionData (..))
 import           Pos.Configuration (HasNodeConfiguration)
 import           Pos.Core (BlockVersionData, CoreConfiguration (..), GenesisConfiguration (..),
                            GenesisInitializer (..), GenesisSpec (..), HasConfiguration, SlotId,
-                           Timestamp (..), genesisSecretKeys, withGenesisSpec, ProtocolConstants)
+                           Timestamp (..), genesisSecretKeys, withGenesisSpec, GenesisProtocolConstants,
+                           HasProtocolConstants)
 import           Pos.Core.Configuration (HasGenesisBlockVersionData, withGenesisBlockVersionData)
 import           Pos.DB (DBPure, MonadDB (..), MonadDBRead (..), MonadGState (..))
 import qualified Pos.DB as DB
@@ -80,10 +80,12 @@ import           Pos.Launcher.Configuration (Configuration (..), HasConfiguratio
 import           Pos.Lrc (LrcContext (..), mkLrcSyncData)
 import           Pos.Network.Types (HasNodeType (..), NodeType (..))
 import           Pos.Reporting (HasReportingContext (..), ReportingContext, emptyReportingContext)
-import           Pos.Slotting (HasSlottingVar (..), MonadSlots (..), SimpleSlottingMode,
-                               SimpleSlottingVar, currentTimeSlottingSimple,
-                               getCurrentSlotBlockingSimple, getCurrentSlotInaccurateSimple,
-                               getCurrentSlotSimple, mkSimpleSlottingVar)
+import           Pos.Slotting (HasSlottingVar (..), MonadSlots (..), MonadSimpleSlotting, SimpleSlottingMode,
+                               SimpleSlottingStateVar, currentTimeSlottingSimple,
+                               getCurrentSlotBlockingSimple, getCurrentSlotBlockingSimple',
+                               getCurrentSlotInaccurateSimple, getCurrentSlotInaccurateSimple',
+                               getCurrentSlotSimple, getCurrentSlotSimple',
+                               mkSimpleSlottingStateVar)
 import           Pos.Slotting.MemState (MonadSlotsData)
 import           Pos.Slotting.Types (SlottingData)
 import           Pos.Ssc (HasSscConfiguration, SscMemTag, SscState, mkSscState)
@@ -153,7 +155,7 @@ genGenesisInitializer = do
 
 -- This function creates 'CoreConfiguration' from 'TestParams' and
 -- uses it to satisfy 'HasConfiguration'.
-withTestParams :: ProtocolConstants -> TestParams -> (HasConfiguration => r) -> r
+withTestParams :: GenesisProtocolConstants -> TestParams -> (HasConfiguration => r) -> r
 withTestParams pc TestParams {..} = withGenesisSpec _tpStartTime coreConfiguration
   where
     defaultCoreConf :: CoreConfiguration
@@ -173,10 +175,11 @@ withTestParams pc TestParams {..} = withGenesisSpec _tpStartTime coreConfigurati
 -- The fields are lazy on purpose: this allows using them with
 -- futures.
 data TestInitModeContext = TestInitModeContext
-    { timcDBPureVar   :: DBPureVar
-    , timcSlottingVar :: TVar SlottingData
-    , timcSystemStart :: !Timestamp
-    , timcLrcContext  :: LrcContext
+    { timcDBPureVar        :: DBPureVar
+    , timcSlottingVar      :: TVar SlottingData
+    , timcSlottingStateVar :: SimpleSlottingStateVar
+    , timcSystemStart      :: !Timestamp
+    , timcLrcContext       :: LrcContext
     }
 
 makeLensesWith postfixLFields ''TestInitModeContext
@@ -198,7 +201,7 @@ data BlockTestContext = BlockTestContext
     { btcGState            :: !GS.GStateContext
     , btcSystemStart       :: !Timestamp
     , btcLoggerName        :: !LoggerName
-    , btcSSlottingVar      :: !SimpleSlottingVar
+    , btcSSlottingStateVar :: !SimpleSlottingStateVar
     , btcUpdateContext     :: !UpdateContext
     , btcSscState          :: !SscState
     , btcTxpMem            :: !(GenericTxpLocalData EmptyMempoolExt)
@@ -241,17 +244,18 @@ initBlockTestContext tp@TestParams {..} callback = do
     (futureLrcCtx, putLrcCtx) <- newInitFuture "lrcCtx"
     (futureSlottingVar, putSlottingVar) <- newInitFuture "slottingVar"
     systemStart <- Timestamp <$> currentTime
+    slottingState <- mkSimpleSlottingStateVar
     let initCtx =
             TestInitModeContext
                 dbPureVar
                 futureSlottingVar
+                slottingState
                 systemStart
                 futureLrcCtx
         initBlockTestContextDo = do
             initNodeDBs
             _gscSlottingVar <- newTVarIO =<< GS.getSlottingData
             putSlottingVar _gscSlottingVar
-            btcSSlottingVar <- mkSimpleSlottingVar
             let btcLoggerName = "testing"
             lcLrcSync <- mkLrcSyncData >>= newTVarIO
             let _gscLrcContext = LrcContext {..}
@@ -273,7 +277,7 @@ initBlockTestContext tp@TestParams {..} callback = do
                             error "initBlockTestContext: no genesisSecretKeys"
                         Just ks -> ks
             let btcAllSecrets = mkAllSecretsSimple secretKeys
-            let btCtx = BlockTestContext {btcSystemStart = systemStart, ..}
+            let btCtx = BlockTestContext {btcSystemStart = systemStart, btcSSlottingStateVar = slottingState, ..}
             liftIO $ flip runReaderT clockVar $ unEmulation $ callback btCtx
     sudoLiftIO $ runTestInitMode initCtx $ initBlockTestContextDo
 
@@ -348,6 +352,9 @@ instance HasLens DBPureVar TestInitModeContext DBPureVar where
 instance HasLens LrcContext TestInitModeContext LrcContext where
     lensOf = timcLrcContext_L
 
+instance HasLens SimpleSlottingStateVar TestInitModeContext SimpleSlottingStateVar where
+    lensOf = timcSlottingStateVar_L
+
 instance HasSlottingVar TestInitModeContext where
     slottingTimestamp = timcSystemStart_L
     slottingVar = timcSlottingVar_L
@@ -367,9 +374,9 @@ instance HasConfiguration => MonadDB TestInitMode where
 instance (HasConfiguration, MonadSlotsData ctx TestInitMode)
       => MonadSlots ctx TestInitMode
   where
-    getCurrentSlot           = getCurrentSlotSimple           =<< mkSimpleSlottingVar
-    getCurrentSlotBlocking   = getCurrentSlotBlockingSimple   =<< mkSimpleSlottingVar
-    getCurrentSlotInaccurate = getCurrentSlotInaccurateSimple =<< mkSimpleSlottingVar
+    getCurrentSlot           = getCurrentSlotSimple
+    getCurrentSlotBlocking   = getCurrentSlotBlockingSimple
+    getCurrentSlotInaccurate = getCurrentSlotInaccurateSimple
     currentTimeSlotting      = currentTimeSlottingSimple
 
 ----------------------------------------------------------------------------
@@ -411,8 +418,8 @@ instance HasLens TxpGlobalSettings BlockTestContext TxpGlobalSettings where
 instance HasLens TestParams BlockTestContext TestParams where
       lensOf = btcParamsL
 
-instance HasLens SimpleSlottingVar BlockTestContext SimpleSlottingVar where
-      lensOf = btcSSlottingVarL
+instance HasLens SimpleSlottingStateVar BlockTestContext SimpleSlottingStateVar where
+      lensOf = btcSSlottingStateVarL
 
 instance HasReportingContext BlockTestContext where
     reportingContext = btcReportingContextL
@@ -441,29 +448,29 @@ instance {-# OVERLAPPING #-} HasLoggerName BlockTestMode where
     modifyLoggerName = modifyLoggerNameDefault
 
 type TestSlottingContext ctx m =
-    ( SimpleSlottingMode ctx m
+    ( MonadSimpleSlotting ctx m
     , HasLens BlockTestContextTag ctx BlockTestContext
     )
 
 testSlottingHelper
     :: TestSlottingContext ctx m
-    => (SimpleSlottingVar -> m a)
+    => (SimpleSlottingStateVar -> m a)
     -> (SlotId -> a)
     -> m a
 testSlottingHelper targetF alternative = do
     BlockTestContext{..} <- view (lensOf @BlockTestContextTag)
     case btcSlotId of
-        Nothing   -> targetF btcSSlottingVar
+        Nothing   -> targetF btcSSlottingStateVar
         Just slot -> pure $ alternative slot
 
-getCurrentSlotTestDefault :: TestSlottingContext ctx m => m (Maybe SlotId)
-getCurrentSlotTestDefault = testSlottingHelper getCurrentSlotSimple Just
+getCurrentSlotTestDefault :: (TestSlottingContext ctx m, HasProtocolConstants) => m (Maybe SlotId)
+getCurrentSlotTestDefault = testSlottingHelper getCurrentSlotSimple' Just
 
-getCurrentSlotBlockingTestDefault :: TestSlottingContext ctx m => m SlotId
-getCurrentSlotBlockingTestDefault = testSlottingHelper getCurrentSlotBlockingSimple identity
+getCurrentSlotBlockingTestDefault :: (TestSlottingContext ctx m, HasProtocolConstants) => m SlotId
+getCurrentSlotBlockingTestDefault = testSlottingHelper getCurrentSlotBlockingSimple' identity
 
-getCurrentSlotInaccurateTestDefault :: TestSlottingContext ctx m => m SlotId
-getCurrentSlotInaccurateTestDefault = testSlottingHelper getCurrentSlotInaccurateSimple identity
+getCurrentSlotInaccurateTestDefault :: (TestSlottingContext ctx m, HasProtocolConstants) => m SlotId
+getCurrentSlotInaccurateTestDefault = testSlottingHelper getCurrentSlotInaccurateSimple' identity
 
 currentTimeSlottingTestDefault :: SimpleSlottingMode ctx m => m Timestamp
 currentTimeSlottingTestDefault = currentTimeSlottingSimple
@@ -489,9 +496,6 @@ instance HasConfiguration => MonadDB BlockTestMode where
 
 instance HasConfiguration => MonadGState BlockTestMode where
     gsAdoptedBVData = gsAdoptedBVDataDefault
-
-instance HasConfiguration => HasAdoptedBlockVersionData BlockTestMode where
-    adoptedBVData = gsAdoptedBVData
 
 instance MonadBListener BlockTestMode where
     onApplyBlocks = onApplyBlocksStub

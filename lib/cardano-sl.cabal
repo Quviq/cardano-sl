@@ -1,5 +1,5 @@
 name:                cardano-sl
-version:             1.1.0
+version:             1.1.1
 synopsis:            Cardano SL main implementation
 description:         Please see README.md
 license:             MIT
@@ -32,7 +32,6 @@ library
                         Pos.Diffusion.Full.Block
                         Pos.Diffusion.Full.Delegation
                         Pos.Diffusion.Full.Ssc
-                        Pos.Diffusion.Full.Types
                         Pos.Diffusion.Full.Txp
                         Pos.Diffusion.Full.Update
 
@@ -58,7 +57,6 @@ library
 
                         -- cardano-sl-client & cardano-sl-generator
                         Pos.Communication.Limits
-                        Pos.Communication.Limits.Given
                         Pos.Communication.Message
                         Pos.Communication.Types
 
@@ -98,6 +96,7 @@ library
                         -- Util code for tests
                         Test.Pos.Configuration
 
+                        Pos.Util.Mockable
                         Pos.Util.Servant
 
 
@@ -124,13 +123,13 @@ library
 
                         Pos.Recovery.Instance
 
-  build-depends:        MonadRandom
+  build-depends:        base
                       , QuickCheck
+                      , async
                       , aeson >= 0.11.2.1
+                      , async
                       , ansi-terminal
                       , ansi-wl-pprint
-                      , base
-                      , binary
                       , bytestring
                       , canonical-json
                       , cardano-crypto
@@ -138,6 +137,7 @@ library
                       , cardano-sl-block
                       , cardano-sl-core
                       , cardano-sl-crypto
+                      , cardano-sl-crypto-test
                       , cardano-sl-db
                       , cardano-sl-delegation
                       , cardano-sl-infra
@@ -151,47 +151,40 @@ library
                       , conduit >= 1.2.8
                       , constraints
                       , containers
+                      , contravariant
                       , cryptonite >= 0.23 && <= 0.24
                       , data-default
-                      , deepseq
                       , directory
-                      , dns >= 3.0.0
                       , ed25519
                       , ekg-core
-                      , ekg-statsd
-                      , ekg-wai
                       , ether >= 0.5
                       , exceptions
                       , filelock >= 0.1.0.1
                       , filepath
                       , formatting
                       , generic-arbitrary
-                      , half
                       , hashable
                       , hspec
-                      , kademlia
                       , lens
                       , log-warper >= 1.1.1
-                      , lrucache
-                      , memory
                       , mmorph
                       , monad-control
                       , mtl
                       , neat-interpolation
                       , network-transport
-                      , network-transport-tcp
                       , optparse-applicative
                       , parsec
                       , plutus-prototype
                       , pvss
                       , random
-                      , reflection
                       , resourcet
-                      , rocksdb-haskell-ng
+                      , reflection
                       , safe-exceptions
                       , safecopy
                       , serokell-util >= 0.1.3.4
                       , servant >= 0.8.1
+                      , servant-client >= 0.8.1
+                      , servant-client-core >= 0.8.1
                       , servant-server >= 0.8.1
                       , servant-swagger
                       , stm
@@ -203,13 +196,15 @@ library
                       , time-units
                       , transformers
                       , transformers-base
+                      , transformers-lift
                       , universum >= 0.1.11
                       , unliftio
                       , unordered-containers
-                      , vector
                       , wai
                       , warp
                       , warp-tls
+                      , streaming-commons
+                      , network
                       , yaml
                       -- https://issues.serokell.io/issue/DEVOPS-230
                       , cpphs
@@ -218,8 +213,10 @@ library
 
   if !os(windows)
     build-depends:      unix
-                     -- See: https://github.com/input-output-hk/stack2nix/issues/56
-                     ,  systemd
+
+  if !os(windows) && !os(freebsd)
+    -- See: https://github.com/input-output-hk/stack2nix/issues/56
+    build-depends:      systemd
 
   hs-source-dirs:       src
   default-language:     Haskell2010
@@ -265,9 +262,6 @@ test-suite cardano-test
                        Test.Pos.Block.Identity.SafeCopySpec
 
                        -- Core
-                       Test.Pos.Core.AddressSpec
-                       Test.Pos.Core.CoinSpec
-                       Test.Pos.Core.Coin2Spec
                        Test.Pos.Core.SeedSpec
                        Test.Pos.Core.SlottingSpec
 
@@ -297,9 +291,6 @@ test-suite cardano-test
                        Test.Pos.Update.Identity.SafeCopySpec
                        Test.Pos.Update.MemStateSpec
                        Test.Pos.Update.PollSpec
-                       Test.Pos.Util.LimitsSpec
-                       Test.Pos.Util.ModifierSpec
-                       Test.Pos.UtilSpec
 
   type:                exitcode-stdio-1.0
   build-depends:       MonadRandom
@@ -313,6 +304,7 @@ test-suite cardano-test
                      , cardano-sl-block
                      , cardano-sl-core
                      , cardano-sl-crypto
+                     , cardano-sl-crypto-test
                      , cardano-sl-db
                      , cardano-sl-delegation
                      , cardano-sl-infra

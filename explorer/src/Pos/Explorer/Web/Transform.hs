@@ -21,16 +21,15 @@ import           Servant.Server (Handler, hoistServer)
 
 import           Pos.Block.Configuration (HasBlockConfiguration)
 import           Pos.Communication (OutSpecs)
-import           Pos.Communication.Limits (HasAdoptedBlockVersionData (..))
 import           Pos.Configuration (HasNodeConfiguration)
 import           Pos.Core (HasConfiguration)
 import           Pos.Diffusion.Types (Diffusion)
-import           Pos.Infra.Configuration (HasInfraConfiguration)
 import           Pos.Recovery ()
 import           Pos.Ssc.Configuration (HasSscConfiguration)
 import           Pos.Txp (HasTxpConfiguration, MempoolExt, MonadTxpLocal (..))
 import           Pos.Update.Configuration (HasUpdateConfiguration)
 import           Pos.Util.CompileInfo (HasCompileInfo)
+import           Pos.Util.Mockable ()
 import           Pos.Worker.Types (WorkerSpec, worker)
 import           Pos.WorkMode (RealMode, RealModeContext (..))
 
@@ -38,7 +37,7 @@ import           Pos.Explorer.BListener (ExplorerBListener, runExplorerBListener
 import           Pos.Explorer.ExtraContext (ExtraContext, ExtraContextT, makeExtraCtx,
                                             runExtraContextT)
 import           Pos.Explorer.Socket.App (NotifierSettings, notifierApp)
-import           Pos.Explorer.Txp (ExplorerExtra, eTxNormalize, eTxProcessTransaction)
+import           Pos.Explorer.Txp (ExplorerExtraModifier, eTxNormalize, eTxProcessTransaction)
 import           Pos.Explorer.Web.Api (explorerApi)
 import           Pos.Explorer.Web.Server (explorerApp, explorerHandlers, explorerServeImpl)
 
@@ -46,23 +45,20 @@ import           Pos.Explorer.Web.Server (explorerApp, explorerHandlers, explore
 -- Transformation to `Handler`
 -----------------------------------------------------------------
 
-type RealModeE = RealMode ExplorerExtra
+type RealModeE = RealMode ExplorerExtraModifier
 type ExplorerProd = ExtraContextT (ExplorerBListener RealModeE)
 
-type instance MempoolExt ExplorerProd = ExplorerExtra
+type instance MempoolExt ExplorerProd = ExplorerExtraModifier
 
-instance (HasConfiguration, HasInfraConfiguration, HasTxpConfiguration, HasCompileInfo) =>
+instance (HasConfiguration, HasTxpConfiguration, HasCompileInfo) =>
          MonadTxpLocal RealModeE where
     txpNormalize = eTxNormalize
     txpProcessTx = eTxProcessTransaction
 
-instance (HasConfiguration, HasInfraConfiguration, HasTxpConfiguration, HasCompileInfo) =>
+instance (HasConfiguration, HasTxpConfiguration, HasCompileInfo) =>
          MonadTxpLocal ExplorerProd where
     txpNormalize = lift $ lift txpNormalize
     txpProcessTx = lift . lift . txpProcessTx
-
-instance HasAdoptedBlockVersionData RealModeE => HasAdoptedBlockVersionData ExplorerProd where
-    adoptedBVData = lift . lift $ adoptedBVData
 
 runExplorerProd :: ExtraContext -> ExplorerProd a -> RealModeE a
 runExplorerProd extraCtx = runExplorerBListener . runExtraContextT extraCtx
@@ -74,7 +70,6 @@ type HasExplorerConfiguration =
     ( HasConfiguration
     , HasBlockConfiguration
     , HasNodeConfiguration
-    , HasInfraConfiguration
     , HasUpdateConfiguration
     , HasSscConfiguration
     , HasCompileInfo
@@ -109,7 +104,7 @@ explorerServeWebReal diffusion port = do
 
 convertHandler
     :: HasConfiguration
-    => RealModeContext ExplorerExtra
+    => RealModeContext ExplorerExtraModifier
     -> ExplorerProd a
     -> Handler a
 convertHandler rctx handler =

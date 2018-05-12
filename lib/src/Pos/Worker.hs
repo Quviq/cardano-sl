@@ -11,7 +11,6 @@ import           Universum
 
 import           Pos.Block.Worker (blkWorkers)
 import           Pos.Communication (OutSpecs)
-import           Pos.Communication.Util (wrapActionSpec)
 -- Message instances.
 import           Pos.Communication.Message ()
 import           Pos.Context (NodeContext (..))
@@ -19,7 +18,7 @@ import           Pos.Delegation.Worker (dlgWorkers)
 import           Pos.Launcher.Resource (NodeResources (..))
 import           Pos.Network.CLI (launchStaticConfigMonitoring)
 import           Pos.Network.Types (NetworkConfig (..))
-import           Pos.Slotting (logNewSlotWorker, slottingWorkers)
+import           Pos.Slotting (logNewSlotWorker)
 import           Pos.Ssc.Worker (sscWorkers)
 import           Pos.Update.Worker (usWorkers)
 import           Pos.Util (mconcatPair)
@@ -32,26 +31,17 @@ allWorkers
        WorkMode ctx m
     => NodeResources ext -> ([WorkerSpec m], OutSpecs)
 allWorkers NodeResources {..} = mconcatPair
-    [
-      -- Only workers of "onNewSlot" type
+    [ -- Only workers of "onNewSlot" type
       -- I have no idea what this ↑ comment means (@gromak).
-
-      wrap' "ssc"        $ sscWorkers
-    , wrap' "us"         $ usWorkers
-
+      sscWorkers
+    , usWorkers
       -- Have custom loggers
-    , wrap' "block"      $ blkWorkers
-    , wrap' "delegation" $ dlgWorkers
-    , wrap' "slotting"   $ (properSlottingWorkers, mempty)
-    , wrap' "StaticConfigMonitoring" $
-      first one $
-      localWorker $
-      launchStaticConfigMonitoring topology
+    , blkWorkers
+    , dlgWorkers
+    , (properSlottingWorkers, mempty)
+    , first one $ localWorker $ launchStaticConfigMonitoring topology
     ]
   where
     topology = ncTopology ncNetworkConfig
     NodeContext {..} = nrContext
-    properSlottingWorkers =
-       fst (localWorker logNewSlotWorker) :
-       map (fst . localWorker) (slottingWorkers ncSlottingContext)
-    wrap' lname = first (map $ wrapActionSpec $ "worker" <> lname)
+    properSlottingWorkers = [fst (localWorker logNewSlotWorker)]

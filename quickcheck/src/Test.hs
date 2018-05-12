@@ -7,7 +7,6 @@ import Prelude
 import Test.QuickCheck
 import Test.QuickCheck.Monadic
 import Pos.Arbitrary.Core
-import Pos.Arbitrary.Crypto
 import Pos.Util.QuickCheck.Arbitrary
 import Pos.Core
 import Test.Pos.Configuration

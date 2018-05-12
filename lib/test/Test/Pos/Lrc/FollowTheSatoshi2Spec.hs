@@ -7,7 +7,6 @@ import Prelude
 import Test.QuickCheck
 import Pos.Util.QuickCheck.Arbitrary
 import Pos.Core
-import Pos.Util.QuickCheck.Backported
 import Pos.Lrc (followTheSatoshi)
 import qualified Data.List.NonEmpty as NonEmpty
 import Text.Printf

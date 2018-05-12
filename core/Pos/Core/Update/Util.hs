@@ -19,6 +19,9 @@ module Pos.Core.Update.Util
        -- * System tag helpers
        , archHelper
        , osHelper
+
+       -- * Other utility functions
+       , isBootstrapEraBVD
        ) where
 
 import           Universum
@@ -32,28 +35,30 @@ import           Instances.TH.Lift ()
 
 import           Pos.Binary.Class (Bi)
 import           Pos.Binary.Crypto ()
-import           Pos.Core.Configuration (HasConfiguration)
 import           Pos.Core.Common.Types (checkCoinPortion)
-import           Pos.Core.Update.Types (BlockVersion, BlockVersionModifier (..), SoftforkRule (..),
+import           Pos.Core.Slotting (EpochIndex, isBootstrapEra)
+import           Pos.Core.Update.Types (BlockVersion, BlockVersionData (..),
+                                        BlockVersionModifier (..), SoftforkRule (..),
                                         SoftwareVersion, SystemTag, UpAttributes, UpdateData,
                                         UpdatePayload (..), UpdateProof, UpdateProposal (..),
                                         UpdateProposalToSign (..), UpdateVote (..), VoteId,
                                         checkSoftwareVersion, checkSystemTag)
-import           Pos.Crypto (SafeSigner, SignTag (SignUSProposal, SignUSVote),
+import           Pos.Crypto (ProtocolMagic, SafeSigner, SignTag (SignUSProposal, SignUSVote),
                              checkSig, hash, safeSign, safeToPublic)
 
 checkUpdatePayload
-    :: (HasConfiguration, MonadError Text m, Bi UpdateProposalToSign)
-    => UpdatePayload
+    :: (MonadError Text m, Bi UpdateProposalToSign)
+    => ProtocolMagic
+    -> UpdatePayload
     -> m ()
-checkUpdatePayload it = do
+checkUpdatePayload pm it = do
     -- Linter denies using foldables on Maybe.
     -- Suggests whenJust rather than forM_.
     --
     --   ¯\_(ツ)_/¯
     --
-    whenJust (upProposal it) checkUpdateProposal
-    forM_ (upVotes it) checkUpdateVote
+    whenJust (upProposal it) (checkUpdateProposal pm)
+    forM_ (upVotes it) (checkUpdateVote pm)
 
 checkBlockVersionModifier
     :: (MonadError Text m)
@@ -80,19 +85,21 @@ softforkRuleF :: Format r (SoftforkRule -> r)
 softforkRuleF = build
 
 checkUpdateVote
-    :: (HasConfiguration, MonadError Text m)
-    => UpdateVote
+    :: (MonadError Text m)
+    => ProtocolMagic
+    -> UpdateVote
     -> m ()
-checkUpdateVote it =
+checkUpdateVote pm it =
     unless sigValid (throwError "UpdateVote: invalid signature")
   where
-    sigValid = checkSig SignUSVote (uvKey it) (uvProposalId it, uvDecision it) (uvSignature it)
+    sigValid = checkSig pm SignUSVote (uvKey it) (uvProposalId it, uvDecision it) (uvSignature it)
 
 checkUpdateProposal
-    :: (HasConfiguration, MonadError Text m, Bi UpdateProposalToSign)
-    => UpdateProposal
+    :: (MonadError Text m, Bi UpdateProposalToSign)
+    => ProtocolMagic
+    -> UpdateProposal
     -> m ()
-checkUpdateProposal it = do
+checkUpdateProposal pm it = do
     checkBlockVersionModifier (upBlockVersionMod it)
     checkSoftwareVersion (upSoftwareVersion it)
     forM_ (HM.keys (upData it)) checkSystemTag
@@ -102,19 +109,20 @@ checkUpdateProposal it = do
             (upSoftwareVersion it)
             (upData it)
             (upAttributes it)
-    unless (checkSig SignUSProposal (upFrom it) toSign (upSignature it))
+    unless (checkSig pm SignUSProposal (upFrom it) toSign (upSignature it))
         (throwError "UpdateProposal: invalid signature")
 
 mkUpdateProposalWSign
-    :: (HasConfiguration, Bi UpdateProposalToSign)
-    => BlockVersion
+    :: (Bi UpdateProposalToSign)
+    => ProtocolMagic
+    -> BlockVersion
     -> BlockVersionModifier
     -> SoftwareVersion
     -> HM.HashMap SystemTag UpdateData
     -> UpAttributes
     -> SafeSigner
     -> UpdateProposal
-mkUpdateProposalWSign upBlockVersion upBlockVersionMod upSoftwareVersion upData upAttributes ss =
+mkUpdateProposalWSign pm upBlockVersion upBlockVersionMod upSoftwareVersion upData upAttributes ss =
     UnsafeUpdateProposal {..}
   where
     toSign =
@@ -125,7 +133,7 @@ mkUpdateProposalWSign upBlockVersion upBlockVersionMod upSoftwareVersion upData 
             upData
             upAttributes
     upFrom = safeToPublic ss
-    upSignature = safeSign SignUSProposal ss toSign
+    upSignature = safeSign pm SignUSProposal ss toSign
 
 mkVoteId :: UpdateVote -> VoteId
 mkVoteId vote = (uvProposalId vote, uvKey vote, uvDecision vote)
@@ -151,3 +159,8 @@ archHelper archt = case archt of
     I386   -> "32"
     X86_64 -> "64"
     _      -> display archt
+
+-- | Version of 'isBootstrapEra' which takes 'BlockVersionData'
+-- instead of unlock stake epoch.
+isBootstrapEraBVD :: BlockVersionData -> EpochIndex -> Bool
+isBootstrapEraBVD adoptedBVD = isBootstrapEra (bvdUnlockStakeEpoch adoptedBVD)

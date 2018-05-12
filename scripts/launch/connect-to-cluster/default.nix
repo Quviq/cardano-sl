@@ -11,6 +11,9 @@
 , ekgListen ? "127.0.0.1:8000"
 , ghcRuntimeArgs ? "-N2 -qg -A1m -I0 -T"
 , additionalNodeArgs ? ""
+, confKey ? null
+, relays ? null
+, extraParams ? ""
 }:
 
 with localLib;
@@ -29,9 +32,15 @@ let
       relays = "relays.awstest.iohkdev.io";
       confKey = "mainnet_dryrun_full";
     };
+    demo = {
+      confKey = "dev";
+    };
+    override = {
+      inherit relays confKey;
+    };
   };
   executables =  {
-    wallet = "${iohkPkgs.cardano-sl-wallet}/bin/cardano-node";
+    wallet = "${iohkPkgs.cardano-sl-wallet-new}/bin/cardano-node";
     explorer = "${iohkPkgs.cardano-sl-explorer-static}/bin/cardano-explorer";
   };
   ifWallet = localLib.optionalString (executable == "wallet");
@@ -59,12 +68,19 @@ in pkgs.writeScript "${executable}-connect-to-${environment}" ''
     echo "Deleting ${stateDir} ... "
     rm -Rf ${stateDir}
   fi
+  if [[ "$2" == "--runtime-args" ]]; then
+    RUNTIME_ARGS=$3
+  else
+    RUNTIME_ARGS=""
+  fi
 
   echo "Keeping state in ${stateDir}"
   mkdir -p ${stateDir}/logs
 
   echo "Launching a node connected to '${environment}' ..."
   ${ifWallet ''
+  export LC_ALL=en_GB.UTF-8
+  export LANG=en_GB.UTF-8
   if [ ! -d ${stateDir}/tls ]; then
     mkdir ${stateDir}/tls/
     ${pkgs.openssl}/bin/openssl req -x509 -newkey rsa:2048 -keyout ${stateDir}/tls/server.key -out ${stateDir}/tls/server.cert -days 3650 -nodes -subj "/CN=localhost"
@@ -73,21 +89,20 @@ in pkgs.writeScript "${executable}-connect-to-${environment}" ''
 
 
   ${executables.${executable}}                                     \
-    --no-ntp                                                       \
     --configuration-file ${configFiles}/configuration.yaml         \
     --configuration-key ${environments.${environment}.confKey}     \
-    ${ ifWallet "--web"}                                           \
     ${ ifWallet "--tlscert ${stateDir}/tls/server.cert"}           \
     ${ ifWallet "--tlskey ${stateDir}/tls/server.key"}             \
     ${ ifWallet "--tlsca ${stateDir}/tls/server.cert"}             \
     --log-config ${configFiles}/log-config-connect-to-cluster.yaml \
     --topology "${configFiles}/topology.yaml"                      \
     --logs-prefix "${stateDir}/logs"                               \
-    --db-path "${stateDir}/db"                                     \
+    --db-path "${stateDir}/db"   ${extraParams}                    \
     ${ ifWallet "--wallet-db-path '${stateDir}/wallet-db'"}        \
     --keyfile ${stateDir}/secret.key                               \
     ${ ifWallet "--wallet-address ${walletListen}" }               \
     --ekg-server ${ekgListen} --metrics                            \
     +RTS ${ghcRuntimeArgs} -RTS                                    \
-    ${additionalNodeArgs}
+    ${additionalNodeArgs}                                          \
+    $RUNTIME_ARGS
 ''

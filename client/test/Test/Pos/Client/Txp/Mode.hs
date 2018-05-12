@@ -22,7 +22,6 @@ import           Pos.Core (Address, BlockVersionData, HasConfiguration, makePubK
 import           Pos.Core.Configuration (HasGenesisBlockVersionData, genesisBlockVersionData)
 import           Pos.Crypto (deterministicKeyGen)
 import           Pos.DB (MonadGState (..))
-import           Pos.Infra.Configuration (HasInfraConfiguration)
 import           Pos.Ssc.Configuration (HasSscConfiguration)
 import           Pos.Update.Configuration (HasUpdateConfiguration)
 
@@ -34,7 +33,6 @@ type HasTxpConfigurations =
        ( HasNodeConfiguration
        , HasSscConfiguration
        , HasConfiguration
-       , HasInfraConfiguration
        , HasUpdateConfiguration
        , HasGenesisBlockVersionData
        )
@@ -87,5 +85,5 @@ instance HasTxpConfigurations => MonadAddresses TxpTestProperty where
     getNewAddress = lift . getNewAddress
     getFakeChangeAddress = lift getFakeChangeAddress
 
-instance HasTxpConfigurations => Testable (TxpTestProperty a) where
+instance (Testable a, HasTxpConfigurations) => Testable (TxpTestProperty a) where
     property = monadic (ioProperty . flip runReaderT genesisBlockVersionData)
